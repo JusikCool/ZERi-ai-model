@@ -30,6 +30,8 @@ def load_data(data_path: Path = DATA_PATH) -> pd.DataFrame:
     df[GROUP_ID] = df[GROUP_ID].astype(str)
     df["Month"] = df["Month"].astype(str)
     df["Day_of_Week"] = df["Day_of_Week"].astype(str)
+    df = df.dropna(subset=[TARGET]).reset_index(drop=True)
+    df[TIME_IDX] = df.groupby(GROUP_ID).cumcount()
     return df
 
 
@@ -50,7 +52,7 @@ def build_dataset(
         max_prediction_length=max_prediction_length,
         static_categoricals=[GROUP_ID],
         time_varying_known_categoricals=TIME_VARYING_KNOWN_CATEGORICALS,
-        time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS + [TARGET],
+        time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS,
         target_normalizer=GroupNormalizer(
             groups=[GROUP_ID], transformation="softplus"
         ),
