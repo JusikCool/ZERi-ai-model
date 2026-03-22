@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(touch c:/ZERi-ai-model/data/raw/.gitkeep c:/ZERi-ai-model/data/processed/.gitkeep c:/ZERi-ai-model/data/features/.gitkeep)",
+      "Bash(touch c:/ZERi-ai-model/model/m1_tft_fixed/.gitkeep c:/ZERi-ai-model/model/m2_tft_vix/.gitkeep c:/ZERi-ai-model/model/m3_full_model/.gitkeep c:/ZERi-ai-model/model/saved/.gitkeep)",
+      "Bash(touch c:/ZERi-ai-model/validation/backtest/.gitkeep c:/ZERi-ai-model/validation/kupiec/.gitkeep)",
+      "Bash(touch c:/ZERi-ai-model/notebooks/.gitkeep c:/ZERi-ai-model/configs/.gitkeep c:/ZERi-ai-model/logs/.gitkeep)"
+    ]
+  }
+}

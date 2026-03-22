@@ -1,0 +1,17 @@
+torch
+pytorch-forecasting
+pytorch-lightning
+yfinance
+fredapi
+pandas
+numpy
+pandas-ta
+optuna
+scipy
+statsmodels
+scikit-learn
+python-dotenv
+pyyaml
+jupyter
+matplotlib
+plotly
