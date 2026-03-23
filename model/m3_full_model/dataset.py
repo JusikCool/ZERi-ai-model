@@ -54,11 +54,12 @@ def build_dataset(
         time_varying_known_categoricals=TIME_VARYING_KNOWN_CATEGORICALS,
         time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS,
         target_normalizer=GroupNormalizer(
-            groups=[GROUP_ID], transformation="softplus"
+            groups=[GROUP_ID], transformation=None
         ),
         add_relative_time_idx=True,
         add_target_scales=True,
         add_encoder_length=True,
+        allow_missing_timesteps=True,
     )
 
     val_dataset = TimeSeriesDataSet.from_dataset(
