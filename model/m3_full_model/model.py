@@ -32,9 +32,9 @@ class M3FullModel(pl.LightningModule):
         dropout: float = 0.1,
         hidden_continuous_size: int = 32,
         quantiles: list[float] = None,
-        vix_threshold: float = 25.0,
-        vix_scale: float = 25.0,
-        sigma_scale: float = 0.02,
+        vix_threshold: float = 0.0,
+        vix_scale: float = 1.0,
+        sigma_scale: float = 1.0,
         alpha: float = 1.0,
         beta: float = 1.0,
     ) -> "M3FullModel":

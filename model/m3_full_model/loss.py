@@ -24,7 +24,7 @@ class AdaptivePinballLoss(nn.Module):
         self, vix: torch.Tensor, sigma: torch.Tensor
     ) -> torch.Tensor:
         vix_excess = torch.clamp(vix - self.vix_threshold, min=0.0) / self.vix_scale
-        sigma_term = sigma / self.sigma_scale
+        sigma_term = torch.relu(sigma) / self.sigma_scale
         return 1.0 + self.alpha * vix_excess + self.beta * sigma_term
 
     def _pinball(
