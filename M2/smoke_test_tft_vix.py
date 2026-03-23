@@ -39,6 +39,8 @@ def main() -> None:
         "prediction_rows": int(len(prediction_df)),
         "prediction_columns": prediction_columns,
         "prediction_shape": list(values.shape),
+        "loss_name": config.loss_name,
+        "lambda_strategy": config.lambda_strategy,
         "best_model_path": result["trainer"].checkpoint_callback.best_model_path,
         "prediction_path": str(prediction_path),
     }

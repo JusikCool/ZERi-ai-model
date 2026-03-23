@@ -41,13 +41,19 @@ class TFTVIXConfig:
             "ATR_14",
             "SMA_20",
             "Returns",
-            "Realized_Vol_20d",
         ]
     )
     max_encoder_length: int = 60
     max_prediction_length: int = 1
     quantiles: List[float] = field(default_factory=lambda: [0.10, 0.25, 0.50])
-    loss_name: str = "quantile"
+    loss_name: str = "adaptive_quantile"
+    lambda_strategy: str = "vix_linear"
+    lambda_min: float = 1.0
+    lambda_max: float = 3.0
+    lambda_alpha: float = 0.8
+    signal_clip: float = 3.0
+    quantile_downside_gamma: float = 0.5
+    downside_temperature: float = 0.02
     batch_size: int = 64
     num_workers: int = 0
     learning_rate: float = 1e-3
