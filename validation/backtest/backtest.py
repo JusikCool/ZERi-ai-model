@@ -1,17 +1,20 @@
+import glob
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_forecasting import TimeSeriesDataSet
 
 from model.m3_full_model.dataset import (
     build_dataset,
-    build_dataloaders,
+    GROUP_ID,
     TIME_IDX,
-    TARGET,
 )
 from model.m3_full_model.model import M3FullModel
-from validation.kupiec.kupiec import run_validation
+from validation.kupiec.kupiec import run_validation_by_group
+
+CHECKPOINT_DIR = Path("model/saved")
 
 
 def rolling_window_backtest(
@@ -22,81 +25,85 @@ def rolling_window_backtest(
     data_cfg = config["data"]
     model_cfg = config["model"]
 
+    ckpts = glob.glob(str(CHECKPOINT_DIR / "*.ckpt"))
+    if not ckpts:
+        raise FileNotFoundError("model/saved/ 에 체크포인트가 없습니다.")
+    ckpt_path = sorted(ckpts)[-1]
+
+    train_ds, _ = build_dataset(
+        df,
+        max_encoder_length=data_cfg["window_size"],
+        max_prediction_length=data_cfg["horizon"],
+    )
+
+    model = M3FullModel.from_dataset(
+        dataset=train_ds,
+        learning_rate=model_cfg["learning_rate"],
+        hidden_size=model_cfg["hidden_size"],
+        attention_head_size=model_cfg["attention_head_size"],
+        dropout=model_cfg["dropout"],
+        quantiles=model_cfg["quantiles"],
+        vix_threshold=model_cfg["vix_threshold"],
+    )
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+
+    group_mapping = {i: g for i, g in enumerate(sorted(df[GROUP_ID].unique()))}
+
     max_time = df[TIME_IDX].max()
     min_time = df[TIME_IDX].min()
-    total_len = max_time - min_time
-
-    fold_size = total_len // (n_splits + 1)
+    fold_size = (max_time - min_time) // (n_splits + 1)
 
     all_y_true = []
     all_y_pred = []
+    all_groups = []
 
     for i in range(n_splits):
         train_end = min_time + fold_size * (i + 1)
         val_end = train_end + fold_size
 
-        train_df = df[df[TIME_IDX] <= train_end]
-        val_df = df[
+        fold_df = df[
             (df[TIME_IDX] > train_end - data_cfg["window_size"])
             & (df[TIME_IDX] <= val_end)
-        ]
+        ].copy()
 
-        train_ds, val_ds = build_dataset(
-            pd.concat([train_df, val_df]).reset_index(drop=True),
-            max_encoder_length=data_cfg["window_size"],
-            max_prediction_length=data_cfg["horizon"],
-            val_ratio=fold_size / (fold_size * (i + 1) + fold_size),
+        val_ds = TimeSeriesDataSet.from_dataset(
+            train_ds,
+            fold_df,
+            predict=False,
+            stop_randomization=True,
         )
-        _, val_loader = build_dataloaders(
-            train_ds, val_ds, batch_size=model_cfg["batch_size"]
-        )
-
-        model = M3FullModel.from_dataset(
-            dataset=train_ds,
-            learning_rate=model_cfg["learning_rate"],
-            hidden_size=model_cfg["hidden_size"],
-            attention_head_size=model_cfg["attention_head_size"],
-            dropout=model_cfg["dropout"],
-            quantiles=model_cfg["quantiles"],
-            vix_threshold=model_cfg["vix_threshold"],
+        val_loader = val_ds.to_dataloader(
+            train=False,
+            batch_size=model_cfg["batch_size"] * 2,
+            num_workers=0,
         )
 
-        trainer = pl.Trainer(
-            max_epochs=model_cfg["max_epochs"],
-            callbacks=[EarlyStopping(monitor="val_loss", patience=8, mode="min")],
-            enable_progress_bar=False,
-            logger=False,
-            gradient_clip_val=0.1,
-        )
-
-        _, val_loader_train = build_dataloaders(
-            train_ds, val_ds, batch_size=model_cfg["batch_size"]
-        )
-        trainer.fit(model, val_loader_train, val_loader)
-
-        fold_preds = []
-        fold_trues = []
-
-        model.eval()
         with torch.no_grad():
             for batch in val_loader:
                 x, y = batch
                 y_true = y[0].numpy()
                 y_pred = model.predict(x).numpy()
-                fold_trues.append(y_true.reshape(-1, y_true.shape[-1]))
-                fold_preds.append(y_pred.reshape(-1, y_pred.shape[-1]))
 
-        all_y_true.append(np.concatenate(fold_trues, axis=0))
-        all_y_pred.append(np.concatenate(fold_preds, axis=0))
+                group_ints = x["groups"][:, 0].numpy()
+                group_names = np.array([group_mapping[g] for g in group_ints])
+                pred_len = y_true.shape[1]
+                groups_expanded = np.repeat(group_names, pred_len)
 
-    y_true_all = np.concatenate(all_y_true, axis=0).ravel()
+                all_y_true.append(y_true.ravel())
+                all_y_pred.append(y_pred.reshape(-1, y_pred.shape[-1]))
+                all_groups.append(groups_expanded)
+
+    y_true_all = np.concatenate(all_y_true)
     y_pred_all = np.concatenate(all_y_pred, axis=0)
-    y_pred_all = y_pred_all.reshape(-1, y_pred_all.shape[-1])
+    groups_all = np.concatenate(all_groups)
 
     val_cfg = config["validation"]
-    report = run_validation(
+    report = run_validation_by_group(
         y_true_all,
         y_pred_all,
+        groups_all,
         quantiles=model_cfg["quantiles"],
         vr_threshold=val_cfg["violation_rate_threshold"],
         pvalue_threshold=val_cfg["kupiec_pvalue_threshold"],

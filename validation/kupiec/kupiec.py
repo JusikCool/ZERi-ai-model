@@ -60,3 +60,34 @@ def run_validation(
         ["quantile", "violations", "n", "violation_rate", "lr_stat", "p_value", "vr_pass", "kupiec_pass"]
     ]
     return df
+
+
+def run_validation_by_group(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    groups: np.ndarray,
+    quantiles: list[float] = None,
+    vr_threshold: float = 0.05,
+    pvalue_threshold: float = 0.05,
+) -> pd.DataFrame:
+    quantiles = quantiles or [0.1, 0.5, 0.9]
+    rows = []
+
+    for group in np.unique(groups):
+        mask = groups == group
+        for i, q in enumerate(quantiles):
+            result = kupiec_pof_test(y_true[mask], y_pred[mask, i], quantile=q)
+            result["group_id"] = group
+            result["quantile"] = q
+            result["vr_pass"] = result["violation_rate"] <= vr_threshold
+            result["kupiec_pass"] = (
+                result["p_value"] >= pvalue_threshold
+                if not np.isnan(result["p_value"])
+                else False
+            )
+            rows.append(result)
+
+    df = pd.DataFrame(rows)[
+        ["group_id", "quantile", "violations", "n", "violation_rate", "lr_stat", "p_value", "vr_pass", "kupiec_pass"]
+    ]
+    return df
