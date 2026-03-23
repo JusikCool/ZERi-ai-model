@@ -70,7 +70,7 @@ def train(config: dict, trial: optuna.Trial | None = None) -> float:
     )
 
     callbacks = [
-        EarlyStopping(monitor="val_loss", patience=8, mode="min"),
+        EarlyStopping(monitor="val_loss", patience=20, mode="min"),
         ModelCheckpoint(
             dirpath=CHECKPOINT_DIR,
             filename="m3_{epoch:02d}_{val_loss:.4f}",

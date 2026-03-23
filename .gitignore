@@ -224,3 +224,5 @@ data/features/
 
 # Claude
 CLAUDE.md
+
+.claude/settings.local.json
