@@ -131,7 +131,7 @@ def run_future_prediction(model, train_ds, df, config, ticker):
     last_close = float(last["Close"])
     horizon = data_cfg["horizon"]
 
-    future_dates = [d.strftime("%Y-%m-%d") for d in pd.date_range(last_date + BDay(1), periods=horizon, freq="B")]
+    future_dates = pd.date_range(last_date + BDay(1), periods=horizon, freq="B")
     future_rows = []
     for i, d in enumerate(future_dates):
         r = last.copy()
@@ -175,7 +175,7 @@ def run_future_prediction(model, train_ds, df, config, ticker):
             q50 = _denorm(best[:, 1], ticker, centers, scales)
             q90 = _denorm(best[:, 2], ticker, centers, scales)
             return dict(
-                dates=list(future_dates),
+                dates=[d.strftime("%Y-%m-%d") for d in future_dates],
                 last_close=last_close,
                 last_date=last_date,
                 q10_price=last_close * (1 + q10),
