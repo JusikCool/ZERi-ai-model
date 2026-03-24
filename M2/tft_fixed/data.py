@@ -8,7 +8,7 @@ import pandas as pd
 from pytorch_forecasting import GroupNormalizer, TimeSeriesDataSet
 
 from .compat import pl
-from .config import TFTVIXConfig
+from .config import TFTFixedConfig
 
 
 @dataclass
@@ -19,8 +19,8 @@ class DatasetBundle:
     prediction_dataset: TimeSeriesDataSet
 
 
-class TFTVIXDataModule(pl.LightningDataModule):
-    def __init__(self, config: TFTVIXConfig):
+class TFTFixedDataModule(pl.LightningDataModule):
+    def __init__(self, config: TFTFixedConfig):
         super().__init__()
         self.config = config
         self.dataframe: Optional[pd.DataFrame] = None
@@ -81,7 +81,7 @@ def load_prepared_panel(data_path: str) -> pd.DataFrame:
     return df
 
 
-def validate_prepared_panel(df: pd.DataFrame, config: TFTVIXConfig) -> None:
+def validate_prepared_panel(df: pd.DataFrame, config: TFTFixedConfig) -> None:
     required_columns = (
         config.static_categoricals
         + config.time_varying_known_categoricals
@@ -92,6 +92,15 @@ def validate_prepared_panel(df: pd.DataFrame, config: TFTVIXConfig) -> None:
     missing = [column for column in required_columns if column not in df.columns]
     if missing:
         raise ValueError(f"Prepared panel is missing required columns: {missing}")
+
+    banned_in_features = set(config.excluded_model_columns) & set(
+        config.static_categoricals
+        + config.time_varying_known_categoricals
+        + config.time_varying_known_reals
+        + config.time_varying_unknown_reals
+    )
+    if banned_in_features:
+        raise ValueError(f"Excluded columns leaked into model features: {sorted(banned_in_features)}")
 
     numeric_columns = config.time_varying_known_reals + config.time_varying_unknown_reals + [config.target_column]
     numeric_frame = df[numeric_columns]
@@ -118,7 +127,7 @@ def validate_prepared_panel(df: pd.DataFrame, config: TFTVIXConfig) -> None:
         )
 
 
-def build_datasets(df: pd.DataFrame, config: TFTVIXConfig) -> DatasetBundle:
+def build_datasets(df: pd.DataFrame, config: TFTFixedConfig) -> DatasetBundle:
     train_cutoff = int(df.loc[df["split"] == "train", "time_idx"].max())
     validation_cutoff = int(df.loc[df["split"] == "validation", "time_idx"].max())
 

@@ -6,10 +6,11 @@ from typing import List
 
 
 @dataclass
-class TFTVIXConfig:
-    data_path: Path = Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\artifacts\tft_vix_panel_ready.csv")
-    output_dir: Path = Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\runs\tft_vix")
+class TFTFixedConfig:
+    data_path: Path = Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\artifacts\tft_fixed_panel_ready.csv")
+    output_dir: Path = Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\runs\tft_fixed")
     target_column: str = "Target_Return_5d"
+    excluded_model_columns: List[str] = field(default_factory=lambda: ["VIX_Close", "Realized_Vol_20d"])
     group_ids: List[str] = field(default_factory=lambda: ["group_id"])
     static_categoricals: List[str] = field(default_factory=lambda: ["group_id"])
     time_varying_known_categoricals: List[str] = field(default_factory=lambda: ["Month", "Day_of_Week"])
@@ -24,7 +25,6 @@ class TFTVIXConfig:
             "Dividends",
             "Stock Splits",
             "NASDAQ_Close",
-            "VIX_Close",
             "FEDFUNDS",
             "UNRATE",
             "DTWEXBGS",
@@ -46,14 +46,6 @@ class TFTVIXConfig:
     max_encoder_length: int = 60
     max_prediction_length: int = 1
     quantiles: List[float] = field(default_factory=lambda: [0.10, 0.25, 0.50])
-    loss_name: str = "adaptive_quantile"
-    lambda_strategy: str = "vix_linear"
-    lambda_min: float = 1.0
-    lambda_max: float = 3.0
-    lambda_alpha: float = 0.8
-    signal_clip: float = 3.0
-    quantile_downside_gamma: float = 0.5
-    downside_temperature: float = 0.02
     batch_size: int = 64
     num_workers: int = 0
     learning_rate: float = 1e-3
@@ -70,3 +62,4 @@ class TFTVIXConfig:
     log_every_n_steps: int = 1
     smoke_test_epochs: int = 2
     seed: int = 42
+    default_plot_ticker: str = "AAPL"

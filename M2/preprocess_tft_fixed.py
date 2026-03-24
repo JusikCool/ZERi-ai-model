@@ -15,14 +15,10 @@ REQUIRED_COLUMNS = [
     "Close",
     "Volume",
     "NASDAQ_Close",
-    "VIX_Close",
     "RSI_14",
     "ATR_14",
     "SMA_20",
     "Returns",
-    "Realized_Vol_20d",
-    "Month",
-    "Day_of_Week",
     "Target_Return_5d",
     "group_id",
     "time_idx",
@@ -40,7 +36,6 @@ TIME_VARYING_UNKNOWN_REALS = [
     "Dividends",
     "Stock Splits",
     "NASDAQ_Close",
-    "VIX_Close",
     "FEDFUNDS",
     "UNRATE",
     "DTWEXBGS",
@@ -57,14 +52,13 @@ TIME_VARYING_UNKNOWN_REALS = [
     "ATR_14",
     "SMA_20",
     "Returns",
-    "Realized_Vol_20d",
 ]
 TARGET_COLUMN = "Target_Return_5d"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prepare a TFT-VIX training panel from the processed panel CSV."
+        description="Prepare a TFT-FIXED training panel from the processed panel CSV."
     )
     parser.add_argument(
         "--input",
@@ -80,30 +74,10 @@ def parse_args() -> argparse.Namespace:
         default=Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\artifacts"),
         help="Directory where processed outputs will be written.",
     )
-    parser.add_argument(
-        "--encoder-length",
-        type=int,
-        default=60,
-        help="Context length reserved for TFT encoder.",
-    )
-    parser.add_argument(
-        "--prediction-horizon",
-        type=int,
-        default=5,
-        help="Forward trading-day return horizon used for target validation.",
-    )
-    parser.add_argument(
-        "--train-ratio",
-        type=float,
-        default=0.70,
-        help="Train split ratio based on unique dates.",
-    )
-    parser.add_argument(
-        "--val-ratio",
-        type=float,
-        default=0.15,
-        help="Validation split ratio based on unique dates.",
-    )
+    parser.add_argument("--encoder-length", type=int, default=60)
+    parser.add_argument("--prediction-horizon", type=int, default=5)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
     return parser.parse_args()
 
 
@@ -126,12 +100,10 @@ def sort_and_cast(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values(["group_id", "Date"]).reset_index(drop=True)
-
     df["group_id"] = df["group_id"].astype(str)
     df["Month"] = df["Month"].astype(str)
     df["Day_of_Week"] = df["Day_of_Week"].astype(str)
     df["time_idx"] = df["time_idx"].astype(int)
-
     return df
 
 
@@ -140,7 +112,6 @@ def enforce_balanced_calendar(df: pd.DataFrame) -> pd.DataFrame:
     expected = df["group_id"].nunique()
     invalid_dates = counts[counts != expected]
     if not invalid_dates.empty:
-        # Drop incomplete panel dates so every remaining date has the same ticker set.
         df = df[~df["Date"].isin(invalid_dates.index)].copy()
     return df
 
@@ -152,8 +123,6 @@ def fill_missing_values(df: pd.DataFrame) -> pd.DataFrame:
         for column in df.columns
         if column not in {"Date", "group_id", "Month", "Day_of_Week"}
     ]
-
-    # Fill within each ticker so one asset never borrows information from another.
     df[numeric_columns] = df.groupby("group_id")[numeric_columns].transform(
         lambda s: s.interpolate(method="linear", limit_direction="both")
     )
@@ -188,7 +157,7 @@ def validate_target(df: pd.DataFrame, horizon: int, tolerance: float = 1e-10) ->
         )
 
 
-def filter_leakage_columns(df: pd.DataFrame) -> pd.DataFrame:
+def filter_model_columns(df: pd.DataFrame) -> pd.DataFrame:
     allowed_columns = (
         ["Date"]
         + STATIC_CATEGORICALS
@@ -209,7 +178,6 @@ def assign_split_labels(
     train_end_idx = int(n_dates * train_ratio)
     val_end_idx = int(n_dates * (train_ratio + val_ratio))
 
-    # Keep at least one full date in each split.
     train_end_idx = min(max(train_end_idx, 1), n_dates - 2)
     val_end_idx = min(max(val_end_idx, train_end_idx + 1), n_dates - 1)
 
@@ -252,6 +220,7 @@ def build_metadata(
         "decoder_length": 1,
         "prediction_horizon": prediction_horizon,
         "target_column": TARGET_COLUMN,
+        "excluded_model_columns": ["VIX_Close", "Realized_Vol_20d"],
         "static_categoricals": STATIC_CATEGORICALS,
         "time_varying_known_categoricals": TIME_VARYING_KNOWN_CATEGORICALS,
         "time_varying_known_reals": TIME_VARYING_KNOWN_REALS,
@@ -267,8 +236,7 @@ def build_metadata(
 
 def save_outputs(df: pd.DataFrame, output_dir: Path, metadata: dict[str, object]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    all_path = output_dir / "tft_vix_panel_ready.csv"
+    all_path = output_dir / "tft_fixed_panel_ready.csv"
     train_path = output_dir / "train.csv"
     val_path = output_dir / "validation.csv"
     test_path = output_dir / "test.csv"
@@ -290,10 +258,8 @@ def main() -> None:
     df = enforce_balanced_calendar(df)
     df = fill_missing_values(df)
     validate_target(df, horizon=args.prediction_horizon)
-    df = filter_leakage_columns(df)
-    df, boundaries = assign_split_labels(
-        df, train_ratio=args.train_ratio, val_ratio=args.val_ratio
-    )
+    df = filter_model_columns(df)
+    df, boundaries = assign_split_labels(df, train_ratio=args.train_ratio, val_ratio=args.val_ratio)
     metadata = build_metadata(
         df=df,
         input_path=args.input,
@@ -303,7 +269,7 @@ def main() -> None:
     )
     save_outputs(df=df, output_dir=args.output_dir, metadata=metadata)
 
-    print(f"Saved TFT-ready panel to: {args.output_dir}")
+    print(f"Saved TFT-FIXED panel to: {args.output_dir}")
     print(json.dumps(metadata, indent=2))
 
 

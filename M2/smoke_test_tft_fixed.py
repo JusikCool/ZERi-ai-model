@@ -6,19 +6,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from tft_vix.config import TFTVIXConfig
-from tft_vix.train import fit_tft_vix_model
+from tft_fixed.config import TFTFixedConfig
+from tft_fixed.train import fit_tft_fixed_model
 
 
 def main() -> None:
-    config = TFTVIXConfig(
-        output_dir=Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\runs\tft_vix_smoke"),
+    config = TFTFixedConfig(
+        output_dir=Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\runs\tft_fixed_smoke"),
         max_epochs=2,
         batch_size=64,
         limit_train_batches=4,
         limit_val_batches=2,
     )
-    result = fit_tft_vix_model(config)
+    result = fit_tft_fixed_model(config)
 
     prediction_path = Path(result["predictions_path"])
     prediction_df = pd.read_csv(prediction_path)
@@ -39,10 +39,11 @@ def main() -> None:
         "prediction_rows": int(len(prediction_df)),
         "prediction_columns": prediction_columns,
         "prediction_shape": list(values.shape),
-        "loss_name": config.loss_name,
-        "lambda_strategy": config.lambda_strategy,
+        "loss_name": "quantile",
         "best_model_path": result["trainer"].checkpoint_callback.best_model_path,
         "prediction_path": str(prediction_path),
+        "loss_curve_path": str(result["loss_curve_path"]),
+        "prediction_plot_path": str(result["prediction_plot_path"]),
     }
     print(json.dumps(payload, indent=2))
 
