@@ -48,7 +48,7 @@ def run_validation(
     for i, q in enumerate(quantiles):
         result = kupiec_pof_test(y_true, y_pred[:, i], quantile=q)
         result["quantile"] = q
-        result["vr_pass"] = result["violation_rate"] <= vr_threshold
+        result["vr_pass"] = abs(result["violation_rate"] - q) <= vr_threshold
         result["kupiec_pass"] = (
             result["p_value"] >= pvalue_threshold
             if not np.isnan(result["p_value"])
@@ -79,7 +79,7 @@ def run_validation_by_group(
             result = kupiec_pof_test(y_true[mask], y_pred[mask, i], quantile=q)
             result["group_id"] = group
             result["quantile"] = q
-            result["vr_pass"] = result["violation_rate"] <= vr_threshold
+            result["vr_pass"] = abs(result["violation_rate"] - q) <= vr_threshold
             result["kupiec_pass"] = (
                 result["p_value"] >= pvalue_threshold
                 if not np.isnan(result["p_value"])
