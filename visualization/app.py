@@ -267,11 +267,19 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days):
             line=dict(color="rgba(80,220,120,0.5)", width=1, dash="dot"),
             name="미래 Q0.9",
         ))
-        fig.add_vline(
-            x=str(future_pred["last_date"].date()),
-            line_dash="dash", line_color="rgba(200,200,200,0.35)",
-            annotation_text="▶ 예측 시작",
-            annotation_font_color="rgba(200,200,200,0.6)",
+        vline_x = str(future_pred["last_date"].date())
+        fig.add_shape(
+            type="line",
+            x0=vline_x, x1=vline_x,
+            y0=0, y1=1, yref="paper",
+            line=dict(dash="dash", color="rgba(200,200,200,0.35)"),
+        )
+        fig.add_annotation(
+            x=vline_x, y=1, yref="paper",
+            text="▶ 예측 시작",
+            showarrow=False,
+            font=dict(color="rgba(200,200,200,0.6)", size=11),
+            xanchor="left",
         )
 
     fig.update_layout(
