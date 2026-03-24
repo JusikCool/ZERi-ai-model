@@ -104,7 +104,7 @@ def run_val_predictions(_model, _train_ds, df, config):
         if not times:
             continue
 
-        dates = [pd.Timestamp(t_df.loc[t, "Date"]) for t in times]
+        dates = [pd.Timestamp(t_df.loc[t, "Date"]).strftime("%Y-%m-%d") for t in times]
         closes = np.array([float(t_df.loc[t, "Close"]) for t in times])
         q10 = _denorm([preds[t][0] for t in times], tick, centers, scales)
         q50 = _denorm([preds[t][1] for t in times], tick, centers, scales)
@@ -131,7 +131,7 @@ def run_future_prediction(model, train_ds, df, config, ticker):
     last_close = float(last["Close"])
     horizon = data_cfg["horizon"]
 
-    future_dates = pd.date_range(last_date + BDay(1), periods=horizon, freq="B")
+    future_dates = [d.strftime("%Y-%m-%d") for d in pd.date_range(last_date + BDay(1), periods=horizon, freq="B")]
     future_rows = []
     for i, d in enumerate(future_dates):
         r = last.copy()
@@ -236,11 +236,11 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days):
     ))
 
     if future_pred:
-        fd = pd.DatetimeIndex(future_pred["dates"])
-        anchor_d = pd.DatetimeIndex([future_pred["last_date"]])
+        fd = future_pred["dates"]
+        anchor_d = [pd.Timestamp(future_pred["last_date"]).strftime("%Y-%m-%d")]
         lc = future_pred["last_close"]
 
-        fd_ext = anchor_d.append(fd)
+        fd_ext = anchor_d + list(fd)
         fq10 = np.concatenate([[lc], future_pred["q10_price"]])
         fq50 = np.concatenate([[lc], future_pred["q50_price"]])
         fq90 = np.concatenate([[lc], future_pred["q90_price"]])
@@ -294,7 +294,7 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days):
 
 def _make_lambda_fig(ticker, df, model):
     t_df = df[df[GROUP_ID] == ticker].sort_values(TIME_IDX).copy()
-    dates = pd.to_datetime(t_df["Date"].values)
+    dates = pd.to_datetime(t_df["Date"].values).strftime("%Y-%m-%d")
     vix_raw = t_df["VIX_Close"].values.astype(float)
     sigma_raw = t_df["Realized_Vol_20d"].values.astype(float)
 
