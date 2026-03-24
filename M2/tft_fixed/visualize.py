@@ -54,25 +54,29 @@ def save_prediction_plot(
     max_points: int = 120,
 ) -> Path:
     prediction_df = pd.read_csv(prediction_path)
-    merge_columns = ["time_idx", "group_id"]
-    actual_df = panel_df[merge_columns + ["Date", target_column]].copy()
-    merged = prediction_df.merge(actual_df, on=merge_columns, how="left", validate="one_to_one")
+    if "y_true" in prediction_df.columns and "Date" in prediction_df.columns:
+        merged = prediction_df.copy()
+    else:
+        merge_columns = ["time_idx", "group_id"]
+        actual_df = panel_df[merge_columns + ["Date", target_column]].copy()
+        merged = prediction_df.merge(actual_df, on=merge_columns, how="left", validate="one_to_one")
+        merged = merged.rename(columns={target_column: "y_true"})
     merged = merged[merged["group_id"] == ticker].sort_values("time_idx").tail(max_points)
     if merged.empty:
         raise ValueError(f"No prediction rows found for ticker {ticker}.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(10, 5))
-    plt.plot(merged["Date"], merged[target_column], label="actual", linewidth=2)
+    plt.plot(merged["Date"], merged["y_true"], label="actual", linewidth=2)
     plt.plot(merged["Date"], merged["pred_q50"], label="pred_q50", linewidth=1.8)
-    plt.plot(merged["Date"], merged["pred_q25"], label="pred_q25", linewidth=1.2)
     plt.plot(merged["Date"], merged["pred_q10"], label="pred_q10", linewidth=1.2)
+    plt.plot(merged["Date"], merged["pred_q90"], label="pred_q90", linewidth=1.2)
     plt.fill_between(
         merged["Date"],
         merged["pred_q10"],
-        merged["pred_q25"],
+        merged["pred_q90"],
         alpha=0.2,
-        label="q10-q25 band",
+        label="q10-q90 band",
     )
     plt.xticks(rotation=30, ha="right")
     plt.xlabel("Date")

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .compat import CSVLogger, EarlyStopping, LearningRateMonitor, ModelCheckpoint, pl
 from .config import TFTFixedConfig
 from .data import TFTFixedDataModule
-from .inference import save_predictions
-from .model import build_tft_model, load_tft_model_from_checkpoint
-from .visualize import save_loss_curve, save_prediction_plot
+from .model import build_tft_model
 
 
 def build_trainer(config: TFTFixedConfig, run_dir: Path) -> pl.Trainer:
@@ -60,52 +57,10 @@ def fit_tft_fixed_model(config: TFTFixedConfig, plot_ticker: str | None = None):
         weights_only=False,
     )
 
-    best_model_path = trainer.checkpoint_callback.best_model_path
-    prediction_model = (
-        load_tft_model_from_checkpoint(best_model_path, config)
-        if best_model_path
-        else model
-    )
-
-    predictions_path = save_predictions(
-        model=prediction_model,
-        dataloader=data_module.predict_dataloader(),
-        output_path=run_dir / "predictions" / "test_predictions.csv",
-        config=config,
-    )
-
-    plots_dir = run_dir / "plots"
-    loss_curve_path = save_loss_curve(run_dir=run_dir, output_path=plots_dir / "loss_curve.png")
-    prediction_plot_path = save_prediction_plot(
-        panel_df=data_module.dataframe,
-        prediction_path=predictions_path,
-        output_path=plots_dir / "prediction_plot.png",
-        target_column=config.target_column,
-        ticker=plot_ticker or config.default_plot_ticker,
-        title_prefix="TFT-FIXED",
-    )
-
-    summary = {
-        "best_model_path": best_model_path,
-        "predictions_path": str(predictions_path),
-        "loss_curve_path": str(loss_curve_path),
-        "prediction_plot_path": str(prediction_plot_path),
-        "validation_metrics": validation_metrics,
-        "loss_name": "quantile",
-        "uses_vix": False,
-        "uses_sigma": False,
-        "uses_adaptive_loss": False,
-    }
-    summary_path = run_dir / "run_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
     return {
-        "model": prediction_model,
+        "model": model,
         "trainer": trainer,
         "data_module": data_module,
-        "predictions_path": predictions_path,
-        "loss_curve_path": loss_curve_path,
-        "prediction_plot_path": prediction_plot_path,
-        "summary_path": summary_path,
+        "best_model_path": trainer.checkpoint_callback.best_model_path,
         "validation_metrics": validation_metrics,
     }

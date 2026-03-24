@@ -10,9 +10,7 @@ from .model import load_tft_model_from_checkpoint
 from .visualize import save_prediction_plot
 
 
-def save_predictions(model, dataloader, output_path: Path, config: TFTFixedConfig) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
+def generate_prediction_frame(model, dataloader, config: TFTFixedConfig) -> pd.DataFrame:
     raw_predictions = model.predict(
         dataloader,
         mode="quantiles",
@@ -35,7 +33,12 @@ def save_predictions(model, dataloader, output_path: Path, config: TFTFixedConfi
         f"pred_q{int(quantile * 100):02d}": predictions[:, idx]
         for idx, quantile in enumerate(config.quantiles)
     }
-    prediction_df = pd.concat([index_df.reset_index(drop=True), pd.DataFrame(prediction_columns)], axis=1)
+    return pd.concat([index_df.reset_index(drop=True), pd.DataFrame(prediction_columns)], axis=1)
+
+
+def save_predictions(model, dataloader, output_path: Path, config: TFTFixedConfig) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prediction_df = generate_prediction_frame(model=model, dataloader=dataloader, config=config)
     prediction_df.to_csv(output_path, index=False)
     return output_path
 

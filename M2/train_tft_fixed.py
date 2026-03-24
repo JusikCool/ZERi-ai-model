@@ -15,7 +15,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
-    parser.add_argument("--plot-ticker", type=str, default=None)
     parser.add_argument("--smoke-test", action="store_true")
     return parser.parse_args()
 
@@ -40,13 +39,10 @@ def main() -> None:
         config.limit_val_batches = 2
         config.output_dir = config.output_dir / "smoke_test"
 
-    result = fit_tft_fixed_model(config, plot_ticker=args.plot_ticker)
+    result = fit_tft_fixed_model(config)
     payload = {
-        "predictions_path": str(result["predictions_path"]),
-        "best_model_path": result["trainer"].checkpoint_callback.best_model_path,
-        "loss_curve_path": str(result["loss_curve_path"]),
-        "prediction_plot_path": str(result["prediction_plot_path"]),
-        "summary_path": str(result["summary_path"]),
+        "best_model_path": result["best_model_path"],
+        "validation_metrics": result["validation_metrics"],
     }
     print(json.dumps(payload, indent=2))
 
