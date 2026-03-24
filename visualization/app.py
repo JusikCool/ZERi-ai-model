@@ -199,8 +199,9 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days):
     q90 = vp["q90_price"]
 
     if history_days > 0:
-        cutoff = dates.max() - np.timedelta64(history_days, "D")
-        mask = dates >= cutoff
+        dates_dt = dates.astype("datetime64[D]")
+        cutoff = dates_dt.max() - np.timedelta64(history_days, "D")
+        mask = dates_dt >= cutoff
         dates, close, q10, q50, q90 = (
             dates[mask], close[mask], q10[mask], q50[mask], q90[mask]
         )
