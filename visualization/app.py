@@ -55,15 +55,6 @@ def load_everything():
     return config, df, train_ds, model
 
 
-def _norm_params(df):
-    stats = df.groupby(GROUP_ID)["Target_Return_5d"].agg(["mean", "std"])
-    return stats["mean"].to_dict(), stats["std"].to_dict()
-
-
-def _denorm(arr, ticker, centers, scales):
-    return np.array(arr) * scales[ticker] + centers[ticker]
-
-
 @st.cache_data
 def run_val_predictions(_model, _train_ds, df, config):
     data_cfg = config["data"]
@@ -91,7 +82,6 @@ def run_val_predictions(_model, _train_ds, df, config):
                     t = int(dtidx[b, h])
                     raw[tick][t] = y_pred[b, h].tolist()
 
-    centers, scales = _norm_params(df)
     results = {}
     for tick in group_list:
         t_df = (
@@ -106,9 +96,9 @@ def run_val_predictions(_model, _train_ds, df, config):
 
         dates = [pd.Timestamp(t_df.loc[t, "Date"]).strftime("%Y-%m-%d") for t in times]
         closes = np.array([float(t_df.loc[t, "Close"]) for t in times])
-        q10 = _denorm([preds[t][0] for t in times], tick, centers, scales)
-        q50 = _denorm([preds[t][1] for t in times], tick, centers, scales)
-        q90 = _denorm([preds[t][2] for t in times], tick, centers, scales)
+        q10 = np.array([preds[t][0] for t in times])
+        q50 = np.array([preds[t][1] for t in times])
+        q90 = np.array([preds[t][2] for t in times])
 
         results[tick] = dict(
             dates=dates,
@@ -158,7 +148,6 @@ def run_future_prediction(model, train_ds, df, config, ticker):
 
         group_list = sorted(df[GROUP_ID].unique())
         g2name = {i: g for i, g in enumerate(group_list)}
-        centers, scales = _norm_params(df)
 
         best = None
         with torch.no_grad():
@@ -171,9 +160,9 @@ def run_future_prediction(model, train_ds, df, config, ticker):
                         best = y_pred[b]
 
         if best is not None:
-            q10 = _denorm(best[:, 0], ticker, centers, scales)
-            q50 = _denorm(best[:, 1], ticker, centers, scales)
-            q90 = _denorm(best[:, 2], ticker, centers, scales)
+            q10 = best[:, 0]
+            q50 = best[:, 1]
+            q90 = best[:, 2]
             return dict(
                 dates=[d.strftime("%Y-%m-%d") for d in future_dates],
                 last_close=last_close,
@@ -187,53 +176,58 @@ def run_future_prediction(model, train_ds, df, config, ticker):
     return None
 
 
-def _make_band_fig(ticker, val_preds, future_pred, history_days):
+def _make_band_fig(ticker, val_preds, future_pred, history_days, df):
     vp = val_preds.get(ticker)
     if vp is None:
         return go.Figure()
 
-    dates = np.array(vp["dates"])
+    val_dates = np.array(vp["dates"])
     close = vp["close"]
     q10 = vp["q10_price"]
     q50 = vp["q50_price"]
     q90 = vp["q90_price"]
 
+    t_df = df[df[GROUP_ID] == ticker].sort_values(TIME_IDX)
+    all_dates = pd.to_datetime(t_df["Date"].values).strftime("%Y-%m-%d")
+    all_close = t_df["Close"].values.astype(float)
+
     if history_days > 0:
-        dates_dt = dates.astype("datetime64[D]")
-        cutoff = dates_dt.max() - np.timedelta64(history_days, "D")
-        mask = dates_dt >= cutoff
-        dates, close, q10, q50, q90 = (
-            dates[mask], close[mask], q10[mask], q50[mask], q90[mask]
+        cutoff_dt = val_dates.astype("datetime64[D]").max() - np.timedelta64(history_days, "D")
+        val_mask = val_dates.astype("datetime64[D]") >= cutoff_dt
+        val_dates, close, q10, q50, q90 = (
+            val_dates[val_mask], close[val_mask],
+            q10[val_mask], q50[val_mask], q90[val_mask],
         )
 
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
-        x=np.concatenate([dates, dates[::-1]]),
+        x=all_dates, y=all_close,
+        line=dict(color="#FFD700", width=1.5),
+        name="실제 종가",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([val_dates, val_dates[::-1]]),
         y=np.concatenate([q90, q10[::-1]]),
         fill="toself", fillcolor="rgba(255,100,100,0.12)",
         line=dict(color="rgba(0,0,0,0)"),
         name="Q0.1 ~ Q0.9 구간",
     ))
     fig.add_trace(go.Scatter(
-        x=dates, y=q10,
+        x=val_dates, y=q10,
         line=dict(color="rgba(255,80,80,0.55)", width=1, dash="dot"),
         name="Q0.1 (하방 위험)",
     ))
     fig.add_trace(go.Scatter(
-        x=dates, y=q90,
+        x=val_dates, y=q90,
         line=dict(color="rgba(80,150,255,0.55)", width=1, dash="dot"),
         name="Q0.9 (상방 한계)",
     ))
     fig.add_trace(go.Scatter(
-        x=dates, y=q50,
+        x=val_dates, y=q50,
         line=dict(color="rgba(255,165,50,0.9)", width=1.5, dash="dash"),
         name="Q0.5 (중앙값 예측)",
-    ))
-    fig.add_trace(go.Scatter(
-        x=dates, y=close,
-        line=dict(color="white", width=2),
-        name="실제 종가",
     ))
 
     if future_pred:
@@ -406,7 +400,7 @@ with tab1:
             with st.spinner(f"{ticker} 미래 10 거래일 예측 중..."):
                 future_pred = run_future_prediction(model, train_ds, df, config, ticker)
         st.plotly_chart(
-            _make_band_fig(ticker, val_preds, future_pred, history_days),
+            _make_band_fig(ticker, val_preds, future_pred, history_days, df),
             use_container_width=True,
         )
 
