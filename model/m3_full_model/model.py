@@ -35,8 +35,11 @@ class M3FullModel(pl.LightningModule):
         vix_threshold: float = 0.0,
         vix_scale: float = 1.0,
         sigma_scale: float = 1.0,
-        alpha: float = 1.0,
-        beta: float = 1.0,
+        alpha_down: float = 1.0,
+        beta_down: float = 1.0,
+        alpha_up: float = 1.0,
+        beta_up: float = 1.0,
+        crossing_weight: float = 0.1,
     ) -> "M3FullModel":
         quantiles = quantiles or [0.1, 0.5, 0.9]
 
@@ -62,8 +65,11 @@ class M3FullModel(pl.LightningModule):
             vix_threshold=vix_threshold,
             vix_scale=vix_scale,
             sigma_scale=sigma_scale,
-            alpha=alpha,
-            beta=beta,
+            alpha_down=alpha_down,
+            beta_down=beta_down,
+            alpha_up=alpha_up,
+            beta_up=beta_up,
+            crossing_weight=crossing_weight,
         )
 
         return cls(

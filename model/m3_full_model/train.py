@@ -35,16 +35,28 @@ def train(config: dict, trial: optuna.Trial | None = None) -> float:
         if trial else model_cfg["dropout"]
     )
     learning_rate = (
-        trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+        trial.suggest_float("learning_rate", 1e-4, 5e-3, log=True)
         if trial else model_cfg["learning_rate"]
     )
-    alpha = (
-        trial.suggest_float("alpha", 0.5, 3.0)
+    alpha_down = (
+        trial.suggest_float("alpha_down", 0.5, 3.0)
         if trial else 1.0
     )
-    beta = (
-        trial.suggest_float("beta", 0.5, 3.0)
+    beta_down = (
+        trial.suggest_float("beta_down", 0.5, 3.0)
         if trial else 1.0
+    )
+    alpha_up = (
+        trial.suggest_float("alpha_up", 0.5, 3.0)
+        if trial else 1.0
+    )
+    beta_up = (
+        trial.suggest_float("beta_up", 0.5, 3.0)
+        if trial else 1.0
+    )
+    crossing_weight = (
+        trial.suggest_float("crossing_weight", 0.01, 0.5)
+        if trial else 0.1
     )
 
     df = load_data()
@@ -65,8 +77,11 @@ def train(config: dict, trial: optuna.Trial | None = None) -> float:
         dropout=dropout,
         quantiles=model_cfg["quantiles"],
         vix_threshold=model_cfg["vix_threshold"],
-        alpha=alpha,
-        beta=beta,
+        alpha_down=alpha_down,
+        beta_down=beta_down,
+        alpha_up=alpha_up,
+        beta_up=beta_up,
+        crossing_weight=crossing_weight,
     )
 
     callbacks = [
