@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .config import TFTFixedConfig
@@ -24,16 +25,37 @@ def generate_prediction_frame(model, dataloader, config: TFTFixedConfig) -> pd.D
     if hasattr(predictions, "detach"):
         predictions = predictions.detach().cpu().numpy()
 
-    if predictions.ndim == 3 and predictions.shape[1] == 1:
-        predictions = predictions[:, 0, :]
-    elif predictions.ndim == 1:
+    if predictions.ndim == 1:
         predictions = predictions[:, None]
 
-    prediction_columns = {
-        f"pred_q{int(quantile * 100):02d}": predictions[:, idx]
-        for idx, quantile in enumerate(config.quantiles)
-    }
-    return pd.concat([index_df.reset_index(drop=True), pd.DataFrame(prediction_columns)], axis=1)
+    if predictions.ndim == 2:
+        prediction_columns = {
+            f"pred_q{int(quantile * 100):02d}": predictions[:, idx]
+            for idx, quantile in enumerate(config.quantiles)
+        }
+        return pd.concat([index_df.reset_index(drop=True), pd.DataFrame(prediction_columns)], axis=1)
+
+    if predictions.ndim != 3:
+        raise ValueError(f"Unsupported prediction shape: {predictions.shape}")
+
+    horizon = predictions.shape[1]
+    quantile_columns = [f"pred_q{int(quantile * 100):02d}" for quantile in config.quantiles]
+
+    repeated_index = index_df.loc[index_df.index.repeat(horizon)].reset_index(drop=True).copy()
+    repeated_index["horizon_step"] = np.tile(np.arange(1, horizon + 1), len(index_df))
+    repeated_index["time_idx"] = repeated_index["time_idx"].astype(int) + repeated_index["horizon_step"] - 1
+
+    flat_predictions = predictions.reshape(-1, predictions.shape[2])
+    flat_prediction_df = pd.DataFrame(flat_predictions, columns=quantile_columns)
+    expanded = pd.concat([repeated_index, flat_prediction_df], axis=1)
+
+    aggregated = (
+        expanded.groupby(["time_idx", "group_id"], as_index=False)[quantile_columns]
+        .mean()
+        .sort_values(["group_id", "time_idx"])
+        .reset_index(drop=True)
+    )
+    return aggregated
 
 
 def save_predictions(model, dataloader, output_path: Path, config: TFTFixedConfig) -> Path:

@@ -8,7 +8,7 @@ import pandas as pd
 from .config import TFTFixedConfig
 from .data import TFTFixedDataModule
 from .inference import generate_prediction_frame
-from .metrics import build_quantile_metrics, build_summary_metrics
+from .metrics import build_group_quantile_metrics, build_quantile_metrics, build_summary_metrics
 from .model import load_tft_model_from_checkpoint
 from .visualize import save_prediction_plot
 
@@ -57,10 +57,15 @@ def evaluate_tft_fixed_model(
     quantile_metrics_csv_path = metrics_dir / "quantile_metrics.csv"
     quantile_metrics.to_csv(quantile_metrics_csv_path, index=False)
 
+    group_quantile_metrics = build_group_quantile_metrics(evaluation_df, config.quantiles)
+    group_quantile_metrics_csv_path = metrics_dir / "group_quantile_metrics.csv"
+    group_quantile_metrics.to_csv(group_quantile_metrics_csv_path, index=False)
+
     summary = {
         "checkpoint_path": str(checkpoint_path),
         "prediction_csv_path": str(prediction_csv_path),
         "quantile_metrics_csv_path": str(quantile_metrics_csv_path),
+        "group_quantile_metrics_csv_path": str(group_quantile_metrics_csv_path),
         "summary_metrics": build_summary_metrics(quantile_metrics),
         "quantiles": list(config.quantiles),
         "uses_vix": False,
@@ -85,6 +90,7 @@ def evaluate_tft_fixed_model(
     result = {
         "prediction_csv_path": str(prediction_csv_path),
         "quantile_metrics_csv_path": str(quantile_metrics_csv_path),
+        "group_quantile_metrics_csv_path": str(group_quantile_metrics_csv_path),
         "summary_json_path": str(summary_json_path),
         "primary_plot_path": str(plots_dir / f"prediction_plot_{plot_ticker or config.default_plot_ticker}.png"),
         "all_plot_paths": plot_paths,

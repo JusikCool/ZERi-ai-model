@@ -72,6 +72,19 @@ def build_quantile_metrics(prediction_df: pd.DataFrame, quantiles: Sequence[floa
     return pd.DataFrame(rows)
 
 
+def build_group_quantile_metrics(
+    prediction_df: pd.DataFrame,
+    quantiles: Sequence[float],
+    group_column: str = "group_id",
+) -> pd.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    for group_value, group_df in prediction_df.groupby(group_column):
+        group_metrics = build_quantile_metrics(group_df, quantiles).copy()
+        group_metrics.insert(0, group_column, str(group_value))
+        rows.extend(group_metrics.to_dict(orient="records"))
+    return pd.DataFrame(rows)
+
+
 def build_summary_metrics(quantile_metrics: pd.DataFrame) -> dict[str, float]:
     q10_row = quantile_metrics.loc[quantile_metrics["quantile"] == 0.10].iloc[0]
     return {
