@@ -9,6 +9,7 @@ from .model import build_tft_model
 
 
 def build_trainer(config: TFTFixedConfig, run_dir: Path) -> pl.Trainer:
+    project_root = Path(__file__).resolve().parent.parent
     callbacks = [
         EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=3, mode="min"),
         ModelCheckpoint(
@@ -20,7 +21,7 @@ def build_trainer(config: TFTFixedConfig, run_dir: Path) -> pl.Trainer:
         ),
         LearningRateMonitor(logging_interval="epoch"),
     ]
-    logger = CSVLogger(save_dir=str(run_dir), name="logs")
+    logger = CSVLogger(save_dir=str(project_root), name="lightning_logs")
 
     return pl.Trainer(
         max_epochs=config.max_epochs,
