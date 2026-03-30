@@ -222,8 +222,5 @@ data/processed/
 data/features/
 .ipynb_checkpoints/
 
-# Claude
-CLAUDE.md
-
-.claude/settings.local.json
 .docs
+.claude/
