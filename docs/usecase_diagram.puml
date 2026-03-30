@@ -1,0 +1,38 @@
+@startuml usecase_diagram
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+actor "사용자\n(분석가)" as User
+actor "DB" as DB
+
+rectangle "하방 리스크 예측 시스템" {
+
+    rectangle "조회 / 설정" {
+        usecase "종목 선택" as UC1
+        usecase "예측 기간 설정" as UC2
+    }
+
+    rectangle "시각화" {
+        usecase "과거 주가 시각화" as UC3
+        usecase "하방 리스크 예측 조회" as UC4
+        usecase "분위수 결과 확인\n(Q0.1 / Q0.5 / Q0.9)" as UC5
+        usecase "VIX 연동 λt 확인" as UC6
+        usecase "백테스팅 결과 확인" as UC7
+    }
+}
+
+User --> UC1
+User --> UC2
+User --> UC3
+User --> UC4
+User --> UC7
+
+UC4 ..> UC5 : <<include>>
+UC4 ..> UC6 : <<include>>
+
+UC3 ..> DB : <<include>>
+UC4 ..> DB : <<include>>
+UC7 ..> DB : <<include>>
+
+@enduml

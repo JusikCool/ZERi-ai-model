@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="2100" math="0" shadow="1">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ===== TITLE ===== -->
+    <mxCell id="title" value="M3 Full Model — 전체 시스템 흐름" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=22;fontStyle=1;fontColor=#1a1a2e;" vertex="1" parent="1">
+      <mxGeometry x="150" y="18" width="1000" height="38" as="geometry" />
+    </mxCell>
+
+    <!-- ===== LEGEND ===== -->
+    <mxCell id="legend" value="&lt;b&gt;범례&lt;/b&gt;" style="rounded=1;fillColor=#f0f0f0;strokeColor=#aaa;strokeWidth=1.5;fontSize=12;fontStyle=1;align=center;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="1060" y="14" width="290" height="100" as="geometry" />
+    </mxCell>
+    <mxCell id="leg1" value="" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" target="leg1_lbl">
+      <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1075" y="56"/><mxPoint x="1155" y="56"/></Array></mxGeometry>
+    </mxCell>
+    <mxCell id="leg1_lbl" value="자동 파이프라인 (매일 6시)" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="1160" y="45" width="180" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="leg2" value="" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" target="leg2_lbl">
+      <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1075" y="88"/><mxPoint x="1155" y="88"/></Array></mxGeometry>
+    </mxCell>
+    <mxCell id="leg2_lbl" value="사용자 접속 흐름" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="1160" y="77" width="180" height="22" as="geometry" />
+    </mxCell>
+
+    <!-- ===== EXTERNAL: yfinance ===== -->
+    <mxCell id="yf" value="" style="rounded=1;fillColor=#e8f5e9;strokeColor=#2e7d32;strokeWidth=2;arcSize=10;" vertex="1" parent="1">
+      <mxGeometry x="80" y="75" width="270" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="yf_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="96" y="88" width="34" height="34" as="geometry" />
+    </mxCell>
+    <mxCell id="yf_txt" value="&lt;b&gt;yfinance API&lt;/b&gt;&lt;br&gt;6종목 OHLCV · VIX · NASDAQ" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="140" y="85" width="200" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- ===== EXTERNAL: FRED ===== -->
+    <mxCell id="fred" value="" style="rounded=1;fillColor=#e8f5e9;strokeColor=#2e7d32;strokeWidth=2;arcSize=10;" vertex="1" parent="1">
+      <mxGeometry x="420" y="75" width="270" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="fred_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="436" y="88" width="34" height="34" as="geometry" />
+    </mxCell>
+    <mxCell id="fred_txt" value="&lt;b&gt;FRED API&lt;/b&gt;&lt;br&gt;기준금리 · GDP · CPI 등 12개" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="480" y="85" width="200" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- ===== BROWSER (외부) ===== -->
+    <mxCell id="browser" value="&lt;b&gt;사용자 브라우저&lt;/b&gt;&lt;br&gt;http://server-ip:8501" style="rounded=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=2;arcSize=10;fontSize=12;html=1;align=center;" vertex="1" parent="1">
+      <mxGeometry x="950" y="75" width="280" height="110" as="geometry" />
+    </mxCell>
+
+    <!-- ===== DOCKER COMPOSE ===== -->
+    <mxCell id="docker" value="&lt;b&gt;Docker Compose  —  GPU 서버&lt;/b&gt;" style="rounded=1;fillColor=#fafafa;strokeColor=#333;strokeWidth=3;arcSize=2;verticalAlign=top;fontSize=14;fontStyle=1;spacingTop=8;" vertex="1" parent="1">
+      <mxGeometry x="50" y="238" width="1290" height="1620" as="geometry" />
+    </mxCell>
+
+    <!-- ===== PIPELINE CONTAINER ===== -->
+    <mxCell id="pipeline" value="" style="rounded=1;fillColor=#f1f8e9;strokeColor=#558b2f;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+      <mxGeometry x="80" y="278" width="1230" height="420" as="geometry" />
+    </mxCell>
+    <mxCell id="pl_badge" value="container: pipeline" style="rounded=1;fillColor=#558b2f;strokeColor=none;fontColor=#fff;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1178" y="286" width="122" height="20" as="geometry" />
+    </mxCell>
+
+    <!-- scheduler -->
+    <mxCell id="sched" value="" style="rounded=1;fillColor=#dcedc8;strokeColor=#558b2f;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="100" y="308" width="1190" height="68" as="geometry" />
+    </mxCell>
+    <mxCell id="sched_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="116" y="322" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="sched_txt" value="&lt;b&gt;scheduler.py&lt;/b&gt;  —  APScheduler  |  매일 오전 6시 KST  →  collector.run()  →  preprocessor.run()  →  api.POST /predict" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="156" y="312" width="1120" height="52" as="geometry" />
+    </mxCell>
+
+    <!-- collector -->
+    <mxCell id="collector" value="" style="rounded=1;fillColor=#c8e6c9;strokeColor=#388e3c;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="100" y="415" width="560" height="260" as="geometry" />
+    </mxCell>
+    <mxCell id="col_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="116" y="430" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="col_txt" value="&lt;b&gt;collector.py&lt;/b&gt;&lt;br&gt;────────────────────────&lt;br&gt;fetch_yfinance()&lt;br&gt;fetch_fred()&lt;br&gt;  (미발표 지표 → 직전값 carry-forward)&lt;br&gt;db.insert(raw_data)&lt;br&gt;  → stock_features 새 행 INSERT" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="156" y="426" width="494" height="238" as="geometry" />
+    </mxCell>
+
+    <!-- preprocessor -->
+    <mxCell id="preproc" value="" style="rounded=1;fillColor=#c8e6c9;strokeColor=#388e3c;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="700" y="415" width="590" height="260" as="geometry" />
+    </mxCell>
+    <mxCell id="pre_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="716" y="430" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="pre_txt" value="&lt;b&gt;preprocessor.py&lt;/b&gt;&lt;br&gt;────────────────────────&lt;br&gt;db.select(최근 20일)&lt;br&gt;  → SELECT stock_features&lt;br&gt;compute_indicators()&lt;br&gt;  → RSI_14 · ATR_14 · SMA_20&lt;br&gt;  → Returns · Realized_Vol_20d (σ)&lt;br&gt;db.update(features)&lt;br&gt;  → UPDATE stock_features 해당 행" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="756" y="426" width="524" height="238" as="geometry" />
+    </mxCell>
+
+    <!-- ===== DB CONTAINER ===== -->
+    <mxCell id="db" value="" style="rounded=1;fillColor=#fff8e1;strokeColor=#f57f17;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+      <mxGeometry x="80" y="770" width="1230" height="280" as="geometry" />
+    </mxCell>
+    <mxCell id="db_pg" value="" style="shape=mxgraph.logos.postgresql;fillColor=#336791;strokeColor=#336791;" vertex="1" parent="1">
+      <mxGeometry x="100" y="786" width="42" height="42" as="geometry" />
+    </mxCell>
+    <mxCell id="db_badge" value="container: db" style="rounded=1;fillColor=#f57f17;strokeColor=none;fontColor=#fff;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1178" y="778" width="122" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="db_title" value="&lt;b&gt;PostgreSQL + TimescaleDB&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="152" y="790" width="380" height="26" as="geometry" />
+    </mxCell>
+
+    <mxCell id="t1" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=8;fillColor=#ffe0b2;strokeColor=#f57f17;" vertex="1" parent="1">
+      <mxGeometry x="100" y="828" width="210" height="200" as="geometry" />
+    </mxCell>
+    <mxCell id="t1_lbl" value="&lt;b&gt;stock_features&lt;/b&gt;&lt;br&gt;─────────────&lt;br&gt;date · ticker (PK)&lt;br&gt;OHLCV · VIX · NASDAQ&lt;br&gt;거시지표 12개&lt;br&gt;RSI · ATR · SMA · σ&lt;br&gt;Returns · Target_5d" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;" vertex="1" parent="1">
+      <mxGeometry x="95" y="845" width="220" height="175" as="geometry" />
+    </mxCell>
+
+    <mxCell id="t2" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=8;fillColor=#ffe0b2;strokeColor=#f57f17;" vertex="1" parent="1">
+      <mxGeometry x="370" y="828" width="210" height="200" as="geometry" />
+    </mxCell>
+    <mxCell id="t2_lbl" value="&lt;b&gt;predictions&lt;/b&gt;&lt;br&gt;─────────────&lt;br&gt;date · ticker (PK)&lt;br&gt;q01 · q05 · q09&lt;br&gt;(예측 분위수 종가)&lt;br&gt;model_version" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;" vertex="1" parent="1">
+      <mxGeometry x="365" y="845" width="220" height="175" as="geometry" />
+    </mxCell>
+
+    <mxCell id="db_n1" value="💡 초기 세팅 (1회): 2015~현재 12년치 bulk insert" style="rounded=1;fillColor=#fffde7;strokeColor=#f57f17;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="650" y="835" width="630" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="db_n2" value="📌 FRED 월별 지표 미발표일 → carry-forward (직전값 유지)" style="rounded=1;fillColor=#fffde7;strokeColor=#f57f17;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="650" y="878" width="630" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="db_n3" value="⏱ TimescaleDB: 시계열 날짜 범위 고속 조회 최적화" style="rounded=1;fillColor=#fffde7;strokeColor=#f57f17;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="650" y="921" width="630" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- ===== API CONTAINER (left, below db) ===== -->
+    <mxCell id="api_box" value="" style="rounded=1;fillColor=#f3e5f5;strokeColor=#7b1fa2;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+      <mxGeometry x="80" y="1120" width="700" height="530" as="geometry" />
+    </mxCell>
+    <mxCell id="api_badge" value="container: api" style="rounded=1;fillColor=#7b1fa2;strokeColor=none;fontColor=#fff;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="658" y="1128" width="112" height="20" as="geometry" />
+    </mxCell>
+
+    <mxCell id="fastapi" value="" style="rounded=1;fillColor=#e1bee7;strokeColor=#7b1fa2;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="100" y="1153" width="250" height="470" as="geometry" />
+    </mxCell>
+    <mxCell id="fa_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="116" y="1167" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="fa_txt" value="&lt;b&gt;FastAPI&lt;/b&gt;  port: 8000&lt;br&gt;────────────────────&lt;br&gt;GET  /predict/{ticker}&lt;br&gt;GET  /history/{ticker}&lt;br&gt;POST /retrain&lt;br&gt;GET  /performance&lt;br&gt;GET  /health&lt;br&gt;────────────────────&lt;br&gt;요청 수신&lt;br&gt;→ TFT 모델 호출&lt;br&gt;→ JSON 반환" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="155" y="1163" width="185" height="450" as="geometry" />
+    </mxCell>
+
+    <mxCell id="arr_fa_tft" value="함수 호출" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=1.5;strokeColor=#7b1fa2;fontStyle=3;fontSize=10;labelBackgroundColor=#f3e5f5;" edge="1" parent="1" source="fastapi" target="tft_box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="tft_box" value="" style="rounded=1;fillColor=#e1bee7;strokeColor=#7b1fa2;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="380" y="1153" width="250" height="300" as="geometry" />
+    </mxCell>
+    <mxCell id="tft_torch" value="" style="shape=mxgraph.logos.pytorch;fillColor=#EE4C2C;strokeColor=#EE4C2C;" vertex="1" parent="1">
+      <mxGeometry x="396" y="1167" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="tft_txt" value="&lt;b&gt;TFT Model (PyTorch)&lt;/b&gt;&lt;br&gt;────────────────────&lt;br&gt;서버 시작 시 1회 로드&lt;br&gt;이후 메모리 상주&lt;br&gt;────────────────────&lt;br&gt;Encoder: 최근 60일&lt;br&gt;Decoder: 10 거래일&lt;br&gt;출력: Q0.1·Q0.5·Q0.9" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="435" y="1163" width="185" height="280" as="geometry" />
+    </mxCell>
+
+    <mxCell id="gpu_box" value="&lt;b&gt;🔲 NVIDIA GPU (CUDA)&lt;/b&gt;&lt;br&gt;📁 model/saved/*.ckpt&lt;br&gt;🔄 재학습: POST /retrain" style="rounded=1;fillColor=#1e1e2e;strokeColor=#76b900;strokeWidth=2;fontColor=#fff;fontSize=10;align=center;html=1;" vertex="1" parent="1">
+      <mxGeometry x="380" y="1480" width="250" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- ===== APP CONTAINER (right, below db) ===== -->
+    <mxCell id="app" value="" style="rounded=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+      <mxGeometry x="830" y="1120" width="480" height="530" as="geometry" />
+    </mxCell>
+    <mxCell id="app_badge" value="container: app" style="rounded=1;fillColor=#1565c0;strokeColor=none;fontColor=#fff;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1178" y="1128" width="122" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="app_py" value="" style="shape=mxgraph.logos.python;fillColor=#3572A5;strokeColor=#3572A5;" vertex="1" parent="1">
+      <mxGeometry x="850" y="1148" width="30" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="app_txt" value="&lt;b&gt;Streamlit + Plotly&lt;/b&gt;  port: 8501&lt;br&gt;────────────────────────────────&lt;br&gt;① 사용자가 종목·날짜 선택&lt;br&gt;② FastAPI GET /predict 호출&lt;br&gt;③ JSON 수신&lt;br&gt;④ 그래프 렌더링&lt;br&gt;─────────────────────────────&lt;br&gt;· Quantile Band 그래프&lt;br&gt;  실제 종가 + Q0.1·Q0.5·Q0.9&lt;br&gt;· λt 동향 그래프&lt;br&gt;  VIX · σ · λt 추이&lt;br&gt;· 미래 2주 예측 밴드" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="890" y="1144" width="398" height="490" as="geometry" />
+    </mxCell>
+
+    <!-- ============================================================ -->
+    <!-- GREEN ARROWS: 자동 파이프라인                                 -->
+    <!-- ============================================================ -->
+
+    <!-- ① ext APIs → pipeline -->
+    <mxCell id="g1a" value="① API 호출" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="yf" target="pipeline">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="g1b" value="" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="fred" target="pipeline">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ② collector → DB (INSERT) -->
+    <mxCell id="g2" value="② INSERT raw data" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.15;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="collector" target="db">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ③ preprocessor ↔ DB (SELECT/UPDATE) -->
+    <mxCell id="g3" value="③ SELECT 20일 / UPDATE" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;startArrow=block;startFill=1;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.65;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="preproc" target="db">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ④ DB → api (SELECT 60일 for inference) -->
+    <mxCell id="g4" value="④ SELECT 60일 (모델 입력)" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="db" target="api_box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ⑤ api → DB (INSERT predictions) — left-side route -->
+    <mxCell id="g5" value="⑤ INSERT predictions" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#2e7d32;dashed=1;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="api_box" target="db">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="42" y="1279" />
+          <mxPoint x="42" y="1050" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ============================================================ -->
+    <!-- BLUE ARROWS: 사용자 접속 흐름                                 -->
+    <!-- ============================================================ -->
+
+    <!-- A: browser → app -->
+    <mxCell id="b1" value="A. 접속" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser" target="app">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- B: app → api (GET request) -->
+    <mxCell id="b2" value="B. GET /predict" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.4;entryDx=0;entryDy=0;" edge="1" parent="1" source="app" target="api_box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- C: api → DB predictions (SELECT) -->
+    <mxCell id="b3" value="C. SELECT predictions" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.8;exitY=0;exitDx=0;exitDy=0;entryX=0.8;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="api_box" target="db">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- D: api → app (JSON response) -->
+    <mxCell id="b4" value="D. JSON 응답" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;dashed=1;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.6;entryDx=0;entryDy=0;" edge="1" parent="1" source="api_box" target="app">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- E: app → browser (display) -->
+    <mxCell id="b5" value="E. 그래프 표시" style="edgeStyle=orthogonalEdgeStyle;strokeWidth=3;strokeColor=#1565c0;dashed=1;fontStyle=1;fontSize=10;labelBackgroundColor=#fff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="app" target="browser">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1070" y="1720" />
+          <mxPoint x="1370" y="1720" />
+          <mxPoint x="1370" y="140" />
+          <mxPoint x="1090" y="140" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+  </root>
+</mxGraphModel>

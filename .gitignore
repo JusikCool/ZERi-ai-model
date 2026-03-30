@@ -226,3 +226,4 @@ data/features/
 CLAUDE.md
 
 .claude/settings.local.json
+.docs
