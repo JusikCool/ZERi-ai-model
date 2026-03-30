@@ -222,5 +222,5 @@ data/processed/
 data/features/
 .ipynb_checkpoints/
 
-# Claude
-CLAUDE.md
+.docs
+.claude/
