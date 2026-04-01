@@ -44,12 +44,12 @@ class TFTFixedConfig:
         ]
     )
     max_encoder_length: int = 60
-    max_prediction_length: int = 1
+    max_prediction_length: int = 10
     quantiles: List[float] = field(default_factory=lambda: [0.10, 0.50, 0.90])
     batch_size: int = 64
     num_workers: int = 0
-    learning_rate: float = 1e-3
-    hidden_size: int = 32
+    learning_rate: float = 3e-4
+    hidden_size: int = 64
     attention_head_size: int = 4
     hidden_continuous_size: int = 16
     dropout: float = 0.1
