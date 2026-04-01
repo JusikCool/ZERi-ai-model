@@ -1,0 +1,26 @@
+data:
+  tickers: ["AAPL", "MSFT", "^IXIC", "^VIX"]
+  start_date: "2015-01-01"
+  end_date: "2025-01-01"
+  window_size: 60
+  horizon: 10
+  vol_window: 20        # 실현변동성(σ) Rolling Window
+
+model:
+  quantiles: [0.1, 0.5, 0.9]
+  vix_threshold: 0      # λt 선형 증가 시작 임계값 (정규화 공간 기준)
+  hidden_size: 64
+  attention_head_size: 4
+  dropout: 0.1
+  learning_rate: 0.0003
+  max_epochs: 50
+  batch_size: 64
+
+ablation:
+  m1_fixed_pinball: true    # M1 고정 Loss
+  m2_vix_only: true         # M2 VIX만 반영
+  m3_full_model: true       # M3 VIX + σ 완전 Adaptive
+
+validation:
+  violation_rate_threshold: 0.05
+  kupiec_pvalue_threshold: 0.05
