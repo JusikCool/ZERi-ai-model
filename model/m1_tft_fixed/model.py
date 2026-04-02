@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pytorch_forecasting import TemporalFusionTransformer
 
-from .config import TFTFixedConfig
-from .losses import LossSpec, build_loss
+try:
+    from .config import TFTFixedConfig
+    from .loss import LossSpec, build_loss
+except ImportError:  # pragma: no cover - direct script execution
+    from config import TFTFixedConfig
+    from loss import LossSpec, build_loss
 
 
 def build_tft_model(train_dataset, config: TFTFixedConfig) -> TemporalFusionTransformer:
@@ -22,5 +26,10 @@ def build_tft_model(train_dataset, config: TFTFixedConfig) -> TemporalFusionTran
     )
 
 
-def load_tft_model_from_checkpoint(checkpoint_path: str, config: TFTFixedConfig) -> TemporalFusionTransformer:
-    return TemporalFusionTransformer.load_from_checkpoint(checkpoint_path, weights_only=False)
+def load_tft_model_from_checkpoint(
+    checkpoint_path: str, config: TFTFixedConfig
+) -> TemporalFusionTransformer:
+    del config
+    return TemporalFusionTransformer.load_from_checkpoint(
+        checkpoint_path, weights_only=False
+    )
