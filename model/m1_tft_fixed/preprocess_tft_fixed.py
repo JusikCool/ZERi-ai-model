@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -14,28 +15,10 @@ REQUIRED_COLUMNS = [
     "Low",
     "Close",
     "Volume",
-    "NASDAQ_Close",
-    "RSI_14",
-    "ATR_14",
-    "SMA_20",
-    "Returns",
-    "Target_Return_5d",
-    "group_id",
-    "time_idx",
-]
-
-STATIC_CATEGORICALS = ["group_id"]
-TIME_VARYING_KNOWN_CATEGORICALS = ["Month", "Day_of_Week"]
-TIME_VARYING_KNOWN_REALS = ["time_idx"]
-TIME_VARYING_UNKNOWN_REALS = [
-    "Open",
-    "High",
-    "Low",
-    "Close",
-    "Volume",
     "Dividends",
     "Stock Splits",
     "NASDAQ_Close",
+    "VIX_Close",
     "FEDFUNDS",
     "UNRATE",
     "DTWEXBGS",
@@ -48,44 +31,56 @@ TIME_VARYING_UNKNOWN_REALS = [
     "PAYEMS",
     "CSUSHPISA",
     "INDPRO",
+    "Month",
+    "Day_of_Week",
     "RSI_14",
     "ATR_14",
     "SMA_20",
     "Returns",
+    "Realized_Vol_20d",
+    "Target_Return_5d",
+    "group_id",
+    "time_idx",
 ]
 TARGET_COLUMN = "Target_Return_5d"
 
 
+def infer_target_horizon(target_column: str = TARGET_COLUMN) -> int:
+    match = re.search(r"Target_Return_(\d+)d", target_column)
+    if match is None:
+        raise ValueError(
+            f"Could not infer target horizon from target column: {target_column}"
+        )
+    return int(match.group(1))
+
+
 def parse_args() -> argparse.Namespace:
+    project_root = Path(__file__).resolve().parent.parent.parent
+    workspace_root = project_root.parent
     parser = argparse.ArgumentParser(
-        description="Prepare a TFT-FIXED training panel from the processed panel CSV."
+        description="Prepare the shared model input CSV used by m3_full_model and m1_tft_fixed."
     )
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path(
-            r"C:\Users\user\Desktop\JERi\data-pipeline-base\dataset\tft_processed_panel_v1.csv"
-        ),
+        default=workspace_root
+        / "data-pipeline-base"
+        / "dataset"
+        / "tft_processed_panel_v1.csv",
         help="Path to the processed panel CSV.",
     )
     parser.add_argument(
-        "--output-dir",
+        "--output-path",
         type=Path,
-        default=Path(r"C:\Users\user\Desktop\JERi\ZERi-ai-model\M2\artifacts"),
-        help="Directory where processed outputs will be written.",
+        default=project_root / "data" / "raw" / "tft_processed_panel_v1.csv",
+        help="Path where the processed panel CSV will be written.",
     )
-    parser.add_argument("--encoder-length", type=int, default=60)
-    parser.add_argument("--prediction-horizon", type=int, default=5)
-    parser.add_argument("--train-ratio", type=float, default=0.70)
-    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument(
+        "--prediction-horizon",
+        type=int,
+        default=infer_target_horizon(),
+    )
     return parser.parse_args()
-
-
-def validate_split_ratios(train_ratio: float, val_ratio: float) -> float:
-    test_ratio = 1.0 - train_ratio - val_ratio
-    if train_ratio <= 0 or val_ratio <= 0 or test_ratio <= 0:
-        raise ValueError("train/validation/test ratios must all be positive.")
-    return test_ratio
 
 
 def load_panel(input_path: Path) -> pd.DataFrame:
@@ -103,7 +98,7 @@ def sort_and_cast(df: pd.DataFrame) -> pd.DataFrame:
     df["group_id"] = df["group_id"].astype(str)
     df["Month"] = df["Month"].astype(str)
     df["Day_of_Week"] = df["Day_of_Week"].astype(str)
-    df["time_idx"] = df["time_idx"].astype(int)
+    df["time_idx"] = df.groupby("group_id").cumcount()
     return df
 
 
@@ -157,120 +152,38 @@ def validate_target(df: pd.DataFrame, horizon: int, tolerance: float = 1e-10) ->
         )
 
 
-def filter_model_columns(df: pd.DataFrame) -> pd.DataFrame:
-    allowed_columns = (
-        ["Date"]
-        + STATIC_CATEGORICALS
-        + TIME_VARYING_KNOWN_CATEGORICALS
-        + TIME_VARYING_KNOWN_REALS
-        + [column for column in TIME_VARYING_UNKNOWN_REALS if column in df.columns]
-        + [TARGET_COLUMN]
-    )
-    return df.loc[:, allowed_columns].copy()
+def select_output_columns(df: pd.DataFrame) -> pd.DataFrame:
+    return df.loc[:, REQUIRED_COLUMNS].copy()
 
 
-def assign_split_labels(
-    df: pd.DataFrame, train_ratio: float, val_ratio: float
-) -> tuple[pd.DataFrame, dict[str, str]]:
-    unique_dates = sorted(df["Date"].unique())
-    n_dates = len(unique_dates)
-
-    train_end_idx = int(n_dates * train_ratio)
-    val_end_idx = int(n_dates * (train_ratio + val_ratio))
-
-    train_end_idx = min(max(train_end_idx, 1), n_dates - 2)
-    val_end_idx = min(max(val_end_idx, train_end_idx + 1), n_dates - 1)
-
-    train_end_date = unique_dates[train_end_idx - 1]
-    val_end_date = unique_dates[val_end_idx - 1]
-
-    split_map: dict[pd.Timestamp, str] = {}
-    for date in unique_dates[:train_end_idx]:
-        split_map[date] = "train"
-    for date in unique_dates[train_end_idx:val_end_idx]:
-        split_map[date] = "validation"
-    for date in unique_dates[val_end_idx:]:
-        split_map[date] = "test"
-
-    df = df.copy()
-    df["split"] = df["Date"].map(split_map)
-
-    boundaries = {
-        "train_end_date": pd.Timestamp(train_end_date).strftime("%Y-%m-%d"),
-        "validation_end_date": pd.Timestamp(val_end_date).strftime("%Y-%m-%d"),
-        "test_end_date": pd.Timestamp(unique_dates[-1]).strftime("%Y-%m-%d"),
-    }
-    return df, boundaries
-
-
-def build_metadata(
-    df: pd.DataFrame,
-    input_path: Path,
-    encoder_length: int,
-    prediction_horizon: int,
-    boundaries: dict[str, str],
-) -> dict[str, object]:
-    return {
-        "input_path": str(input_path),
-        "rows": int(len(df)),
-        "tickers": sorted(df["group_id"].unique().tolist()),
-        "date_min": df["Date"].min().strftime("%Y-%m-%d"),
-        "date_max": df["Date"].max().strftime("%Y-%m-%d"),
-        "encoder_length": encoder_length,
-        "decoder_length": 1,
-        "prediction_horizon": prediction_horizon,
-        "target_column": TARGET_COLUMN,
-        "excluded_model_columns": ["VIX_Close", "Realized_Vol_20d"],
-        "static_categoricals": STATIC_CATEGORICALS,
-        "time_varying_known_categoricals": TIME_VARYING_KNOWN_CATEGORICALS,
-        "time_varying_known_reals": TIME_VARYING_KNOWN_REALS,
-        "time_varying_unknown_reals": [
-            column for column in TIME_VARYING_UNKNOWN_REALS if column in df.columns
-        ],
-        "train_rows": int((df["split"] == "train").sum()),
-        "validation_rows": int((df["split"] == "validation").sum()),
-        "test_rows": int((df["split"] == "test").sum()),
-        "split_boundaries": boundaries,
-    }
-
-
-def save_outputs(df: pd.DataFrame, output_dir: Path, metadata: dict[str, object]) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    all_path = output_dir / "tft_fixed_panel_ready.csv"
-    train_path = output_dir / "train.csv"
-    val_path = output_dir / "validation.csv"
-    test_path = output_dir / "test.csv"
-    metadata_path = output_dir / "dataset_meta.json"
-
-    df.to_csv(all_path, index=False)
-    df[df["split"] == "train"].to_csv(train_path, index=False)
-    df[df["split"] == "validation"].to_csv(val_path, index=False)
-    df[df["split"] == "test"].to_csv(test_path, index=False)
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+def save_output(df: pd.DataFrame, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, index=False)
 
 
 def main() -> None:
     args = parse_args()
-    validate_split_ratios(args.train_ratio, args.val_ratio)
 
     df = load_panel(args.input)
     df = sort_and_cast(df)
     df = enforce_balanced_calendar(df)
     df = fill_missing_values(df)
     validate_target(df, horizon=args.prediction_horizon)
-    df = filter_model_columns(df)
-    df, boundaries = assign_split_labels(df, train_ratio=args.train_ratio, val_ratio=args.val_ratio)
-    metadata = build_metadata(
-        df=df,
-        input_path=args.input,
-        encoder_length=args.encoder_length,
-        prediction_horizon=args.prediction_horizon,
-        boundaries=boundaries,
-    )
-    save_outputs(df=df, output_dir=args.output_dir, metadata=metadata)
+    df = select_output_columns(df)
+    save_output(df=df, output_path=args.output_path)
 
-    print(f"Saved TFT-FIXED panel to: {args.output_dir}")
-    print(json.dumps(metadata, indent=2))
+    summary = {
+        "output_path": str(args.output_path),
+        "rows": int(len(df)),
+        "tickers": sorted(df["group_id"].unique().tolist()),
+        "date_min": df["Date"].min().strftime("%Y-%m-%d"),
+        "date_max": df["Date"].max().strftime("%Y-%m-%d"),
+        "prediction_horizon": args.prediction_horizon,
+        "contains_vix": "VIX_Close" in df.columns,
+        "contains_sigma": "Realized_Vol_20d" in df.columns,
+    }
+    print(f"Saved shared training panel to: {args.output_path}")
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":
