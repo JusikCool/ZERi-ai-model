@@ -14,6 +14,8 @@ class M3FullModel(pl.LightningModule):
         vix_encoder_idx: int,
         sigma_encoder_idx: int,
         learning_rate: float = 0.001,
+        vix_mean: float = 0.0,
+        vix_std: float = 1.0,
     ):
         super().__init__()
         self.tft = tft
@@ -21,6 +23,8 @@ class M3FullModel(pl.LightningModule):
         self.vix_encoder_idx = vix_encoder_idx
         self.sigma_encoder_idx = sigma_encoder_idx
         self.learning_rate = learning_rate
+        self.vix_mean = vix_mean
+        self.vix_std = vix_std
 
     @classmethod
     def from_dataset(
@@ -32,8 +36,9 @@ class M3FullModel(pl.LightningModule):
         dropout: float = 0.1,
         hidden_continuous_size: int = 32,
         quantiles: list[float] = None,
-        vix_threshold: float = 0.0,
-        vix_scale: float = 1.0,
+        vix_threshold: float = 25.0,
+        vix_mean: float = 0.0,
+        vix_std: float = 1.0,
         sigma_scale: float = 1.0,
         alpha_down: float = 1.0,
         beta_down: float = 1.0,
@@ -63,7 +68,7 @@ class M3FullModel(pl.LightningModule):
         adaptive_loss = AdaptivePinballLoss(
             quantiles=quantiles,
             vix_threshold=vix_threshold,
-            vix_scale=vix_scale,
+            vix_scale=vix_std,
             sigma_scale=sigma_scale,
             alpha_down=alpha_down,
             beta_down=beta_down,
@@ -78,6 +83,8 @@ class M3FullModel(pl.LightningModule):
             vix_encoder_idx=vix_idx,
             sigma_encoder_idx=sigma_idx,
             learning_rate=learning_rate,
+            vix_mean=vix_mean,
+            vix_std=vix_std,
         )
 
     def forward(self, x: dict) -> dict:
@@ -87,7 +94,9 @@ class M3FullModel(pl.LightningModule):
         self, x: dict, pred_len: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
         enc = x["encoder_cont"]
-        vix = enc[:, -1, self.vix_encoder_idx].unsqueeze(1).expand(-1, pred_len)
+        vix_norm = enc[:, -1, self.vix_encoder_idx]
+        vix_raw = vix_norm * self.vix_std + self.vix_mean
+        vix = vix_raw.unsqueeze(1).expand(-1, pred_len)
         sigma = enc[:, -1, self.sigma_encoder_idx].unsqueeze(1).expand(-1, pred_len)
         return vix, sigma
 

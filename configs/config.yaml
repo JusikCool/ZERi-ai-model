@@ -8,7 +8,7 @@ data:
 
 model:
   quantiles: [0.1, 0.5, 0.9]
-  vix_threshold: 0      # λt 선형 증가 시작 임계값 (정규화 공간 기준)
+  vix_threshold: 25     # λt 선형 증가 시작 임계값 (raw VIX 기준, 주요 시장 위기 구간 하한선)
   hidden_size: 64
   attention_head_size: 4
   dropout: 0.1

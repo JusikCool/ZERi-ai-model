@@ -298,11 +298,10 @@ def _make_lambda_fig(ticker, df, model):
     vix_raw = t_df["VIX_Close"].values.astype(float)
     sigma_raw = t_df["Realized_Vol_20d"].values.astype(float)
 
-    vix_z = (vix_raw - vix_raw.mean()) / (vix_raw.std() + 1e-8)
     sigma_z = (sigma_raw - sigma_raw.mean()) / (sigma_raw.std() + 1e-8)
 
     al = model.adaptive_loss
-    vix_ex = np.maximum(vix_z - al.vix_threshold, 0.0) / al.vix_scale
+    vix_ex = np.maximum(vix_raw - al.vix_threshold, 0.0) / al.vix_scale
     sig_t = np.maximum(sigma_z, 0.0) / al.sigma_scale
 
     lam_down = 1.0 + al.alpha_down * vix_ex + al.beta_down * sig_t

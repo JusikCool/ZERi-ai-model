@@ -24,6 +24,11 @@ TIME_VARYING_UNKNOWN_REALS = [
 ]
 
 
+def get_vix_stats(df: pd.DataFrame) -> tuple[float, float]:
+    vix = df["VIX_Close"].dropna()
+    return float(vix.mean()), float(vix.std())
+
+
 def load_data(data_path: Path = DATA_PATH) -> pd.DataFrame:
     df = pd.read_csv(data_path, parse_dates=["Date"])
     df = df.sort_values([GROUP_ID, TIME_IDX]).reset_index(drop=True)

@@ -8,6 +8,7 @@ from pytorch_forecasting import TimeSeriesDataSet
 
 from model.m3_full_model.dataset import (
     build_dataset,
+    get_vix_stats,
     GROUP_ID,
     TIME_IDX,
 )
@@ -30,6 +31,8 @@ def rolling_window_backtest(
         raise FileNotFoundError("model/saved/ 에 체크포인트가 없습니다.")
     ckpt_path = sorted(ckpts)[-1]
 
+    vix_mean, vix_std = get_vix_stats(df)
+
     train_ds, _ = build_dataset(
         df,
         max_encoder_length=data_cfg["window_size"],
@@ -44,6 +47,8 @@ def rolling_window_backtest(
         dropout=model_cfg["dropout"],
         quantiles=model_cfg["quantiles"],
         vix_threshold=model_cfg["vix_threshold"],
+        vix_mean=vix_mean,
+        vix_std=vix_std,
     )
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
