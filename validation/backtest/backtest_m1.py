@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "configs" / "config.yaml"
 DEFAULT_CHECKPOINT_DIR = PROJECT_ROOT / "model" / "m1_tft_fixed" / "runs" / "tft_fixed" / "checkpoints"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "model" / "m1_tft_fixed" / "runs" / "tft_fixed" / "backtest"
+COVID_START = "2020-01-01"
+COVID_END = "2021-01-01"
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -182,6 +184,85 @@ def rolling_window_backtest_m1(
         encoding="utf-8",
     )
     return result
+
+
+def covid_backtest_m1(
+    checkpoint_path: Path,
+    config: TFTFixedConfig,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    thresholds: dict | None = None,
+    start: str = COVID_START,
+    end: str = COVID_END,
+) -> pd.DataFrame:
+    thresholds = thresholds or load_validation_config()["validation"]
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    df = load_data(config.data_path)
+    datasets = build_dataset(df, config)
+    train_dataset = datasets.train_dataset
+    model = load_tft_model_from_checkpoint(str(checkpoint_path), config)
+
+    covid_time_idx = df[(df["Date"] >= start) & (df["Date"] < end)]["time_idx"].unique()
+    if len(covid_time_idx) == 0:
+        raise ValueError(f"No rows found for COVID period {start} ~ {end}")
+
+    t_min = int(covid_time_idx.min())
+    t_max = int(covid_time_idx.max())
+    fold_df = df[
+        (df["time_idx"] >= t_min - config.max_encoder_length)
+        & (df["time_idx"] <= t_max)
+    ].copy()
+
+    val_dataset = train_dataset.from_dataset(
+        train_dataset,
+        fold_df,
+        predict=False,
+        stop_randomization=True,
+    )
+    val_loader = val_dataset.to_dataloader(
+        train=False,
+        batch_size=config.batch_size * 2,
+        num_workers=config.num_workers,
+    )
+
+    predictions = model.predict(
+        val_loader,
+        mode="quantiles",
+        return_index=True,
+        return_y=True,
+        trainer_kwargs={"accelerator": config.accelerator, "devices": config.devices},
+    )
+
+    y_pred = predictions.output
+    if hasattr(y_pred, "detach"):
+        y_pred = y_pred.detach().cpu().numpy()
+
+    y_true = predictions.y
+    if isinstance(y_true, tuple):
+        y_true = y_true[0]
+    if hasattr(y_true, "detach"):
+        y_true = y_true.detach().cpu().numpy()
+
+    if y_pred.ndim != 3:
+        raise ValueError(f"Expected 3D quantile predictions, got shape {y_pred.shape}")
+
+    group_values = predictions.index["group_id"].astype(str).reset_index(drop=True)
+    y_true_last = y_true[:, -1]
+    y_pred_last = y_pred[:, -1, :]
+
+    report = run_validation_by_group(
+        y_true=y_true_last,
+        y_pred=y_pred_last,
+        groups=group_values.to_numpy(),
+        quantiles=list(config.quantiles),
+        vr_threshold=thresholds["violation_rate_threshold"],
+        pvalue_threshold=thresholds["kupiec_pvalue_threshold"],
+    )
+    report["period"] = f"{start} ~ {end}"
+
+    report_path = output_dir / "covid_backtest_m1_by_group.csv"
+    report.to_csv(report_path, index=False)
+    return report
 
 
 def parse_args() -> argparse.Namespace:
