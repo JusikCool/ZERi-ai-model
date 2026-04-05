@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 import yaml
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
-from .dataset import build_dataset, build_dataloaders, load_data
+from .dataset import build_dataset, build_dataloaders, get_vix_stats, load_data
 from .model import M3FullModel
 
 CONFIG_PATH = Path("configs/config.yaml")
@@ -60,6 +60,7 @@ def train(config: dict, trial: optuna.Trial | None = None) -> float:
     )
 
     df = load_data()
+    vix_mean, vix_std = get_vix_stats(df)
     train_ds, val_ds = build_dataset(
         df,
         max_encoder_length=data_cfg["window_size"],
@@ -77,6 +78,8 @@ def train(config: dict, trial: optuna.Trial | None = None) -> float:
         dropout=dropout,
         quantiles=model_cfg["quantiles"],
         vix_threshold=model_cfg["vix_threshold"],
+        vix_mean=vix_mean,
+        vix_std=vix_std,
         alpha_down=alpha_down,
         beta_down=beta_down,
         alpha_up=alpha_up,
