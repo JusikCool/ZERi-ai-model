@@ -1,0 +1,126 @@
+@startuml UC-01: 하방 리스크 예측 조회
+actor 사용자
+participant Streamlit
+participant FastAPI
+database PostgreSQL
+
+사용자 -> Streamlit : 종목 선택 및 예측 표시 요청
+Streamlit -> FastAPI : GET /predictions?ticker={종목}&date={날짜}
+FastAPI -> PostgreSQL : SELECT * FROM predictions WHERE ticker=? AND date=?
+
+alt 예측 결과 존재
+    PostgreSQL --> FastAPI : Q0.1 / Q0.5 / Q0.9 예측 결과 반환
+    FastAPI --> Streamlit : 예측 결과 JSON 반환
+    Streamlit --> 사용자 : 분위수별 예측 밴드 그래프 출력
+else 예측 결과 없음
+    PostgreSQL --> FastAPI : 빈 결과 반환
+    FastAPI --> Streamlit : 404 반환
+    Streamlit --> 사용자 : 안내 메시지 출력
+end
+@enduml
+
+@startuml UC-03: 과거 실제 종가 조회
+actor 사용자
+participant Streamlit
+participant FastAPI
+database PostgreSQL
+
+사용자 -> Streamlit : 종목 선택 및 종가 조회 요청
+Streamlit -> FastAPI : GET /prices?ticker={종목}
+FastAPI -> PostgreSQL : SELECT * FROM prices WHERE ticker=?
+
+alt 종가 데이터 존재
+    PostgreSQL --> FastAPI : 실제 종가 데이터 반환
+    FastAPI --> Streamlit : 종가 데이터 JSON 반환
+    Streamlit --> 사용자 : 실제 종가 그래프 출력
+else 종가 데이터 없음
+    PostgreSQL --> FastAPI : 빈 결과 반환
+    FastAPI --> Streamlit : 404 반환
+    Streamlit --> 사용자 : 안내 메시지 출력
+end
+@enduml
+
+@startuml UC-02: 하방 리스크 예측 변수 중요도 조회
+actor 사용자
+participant Streamlit
+participant FastAPI
+database PostgreSQL
+
+사용자 -> Streamlit : 예측 밴드 그래프의 특정 날짜 클릭
+Streamlit -> FastAPI : GET /feature-importance?ticker={종목}&date={날짜}
+FastAPI -> PostgreSQL : SELECT * FROM feature_importance WHERE ticker=? AND date=?
+
+alt 중요도 데이터 존재
+    PostgreSQL --> FastAPI : 예측 변수 중요도 데이터 반환
+    FastAPI --> Streamlit : 중요도 데이터 JSON 반환
+    Streamlit --> 사용자 : 예측 변수 중요도 순위별 출력
+else 중요도 데이터 없음
+    PostgreSQL --> FastAPI : 빈 결과 반환
+    FastAPI --> Streamlit : 404 반환
+    Streamlit --> 사용자 : 안내 메시지 출력
+end
+@enduml
+
+@startuml UC-04: 하방 리스크 예측 실행
+participant CronJob
+participant FastAPI
+participant "AI (TFT 모델)" as TFT
+database PostgreSQL
+
+CronJob -> FastAPI : POST /predict (매일 06:20 KST)
+FastAPI -> PostgreSQL : 전처리된 최신 데이터 조회
+
+alt 데이터 조회 성공
+    PostgreSQL --> FastAPI : 피처 데이터 반환
+    FastAPI -> TFT : 예측 실행 요청
+    alt 예측 성공
+        TFT --> FastAPI : Q0.1 / Q0.5 / Q0.9 예측 결과 반환
+        FastAPI -> PostgreSQL : 예측 결과 및 예측 실행 날짜 저장
+        alt 저장 성공
+            PostgreSQL --> FastAPI : 저장 완료
+        else 저장 실패
+            FastAPI -> FastAPI : 오류 로그 기록 및 종료
+        end
+    else 예측 실패
+        FastAPI -> FastAPI : 오류 로그 기록 및 종료
+    end
+else 데이터 조회 실패
+    FastAPI -> FastAPI : 오류 로그 기록 및 종료
+end
+@enduml
+
+@startuml UC-05: 데이터 수집
+participant CronJob
+participant FastAPI
+database PostgreSQL
+participant yfinance
+participant "FRED API" as FRED
+
+CronJob -> FastAPI : POST /collect (매일 06:00 KST)
+FastAPI -> yfinance : 전날 종가 및 VIX 데이터 요청
+
+alt yfinance 호출 성공
+    yfinance --> FastAPI : 종가 및 VIX 데이터 반환
+    FastAPI -> FRED : 거시경제 지표 요청
+    alt FRED 호출 성공
+        FRED --> FastAPI : 거시경제 지표 반환
+        FastAPI -> PostgreSQL : 기존 과거 데이터 조회
+        alt 과거 데이터 조회 성공
+            PostgreSQL --> FastAPI : 과거 데이터 반환
+            FastAPI -> FastAPI : 기술적 지표 및 실현변동성(σ) 계산하여 피처 도출
+            FastAPI -> PostgreSQL : 전처리된 데이터 저장
+            alt 저장 성공
+                PostgreSQL --> FastAPI : 저장 완료
+            else 저장 실패
+                FastAPI -> FastAPI : 오류 로그 기록 및 종료
+            end
+        else 과거 데이터 조회 실패
+            FastAPI -> FastAPI : 오류 로그 기록 및 종료
+        end
+    else FRED 호출 실패
+        FastAPI -> FastAPI : 오류 로그 기록 및 종료
+    end
+else yfinance 호출 실패
+    FastAPI -> FastAPI : 오류 로그 기록 및 종료
+end
+@enduml

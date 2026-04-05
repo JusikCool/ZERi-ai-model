@@ -85,7 +85,7 @@ def run_val_predictions(_model, _train_ds, df, config):
     results = {}
     for tick in group_list:
         t_df = (
-            df[df[GROUP_ID] == tick][[TIME_IDX, "Date", "Close"]]
+            df[df[GROUP_ID] == tick][[TIME_IDX, "Date", "Close", "Target_Return_5d"]]
             .drop_duplicates(TIME_IDX)
             .set_index(TIME_IDX)
         )
@@ -94,15 +94,22 @@ def run_val_predictions(_model, _train_ds, df, config):
         if not times:
             continue
 
-        dates = [pd.Timestamp(t_df.loc[t, "Date"]).strftime("%Y-%m-%d") for t in times]
+        horizon = config["data"]["horizon"]
+        future_times = [t + horizon for t in times]
+        valid = [(t, ft) for t, ft in zip(times, future_times) if ft in t_df.index]
+        if not valid:
+            continue
+        times, future_times = zip(*valid)
+
+        future_dates = [pd.Timestamp(t_df.loc[ft, "Date"]).strftime("%Y-%m-%d") for ft in future_times]
         closes = np.array([float(t_df.loc[t, "Close"]) for t in times])
+
         q10 = np.array([preds[t][0] for t in times])
         q50 = np.array([preds[t][1] for t in times])
         q90 = np.array([preds[t][2] for t in times])
 
         results[tick] = dict(
-            dates=dates,
-            close=closes,
+            dates=future_dates,
             q10_price=closes * (1 + q10),
             q50_price=closes * (1 + q50),
             q90_price=closes * (1 + q90),
@@ -182,7 +189,6 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days, df):
         return go.Figure()
 
     val_dates = np.array(vp["dates"])
-    close = vp["close"]
     q10 = vp["q10_price"]
     q50 = vp["q50_price"]
     q90 = vp["q90_price"]
@@ -194,9 +200,8 @@ def _make_band_fig(ticker, val_preds, future_pred, history_days, df):
     if history_days > 0:
         cutoff_dt = val_dates.astype("datetime64[D]").max() - np.timedelta64(history_days, "D")
         val_mask = val_dates.astype("datetime64[D]") >= cutoff_dt
-        val_dates, close, q10, q50, q90 = (
-            val_dates[val_mask], close[val_mask],
-            q10[val_mask], q50[val_mask], q90[val_mask],
+        val_dates, q10, q50, q90 = (
+            val_dates[val_mask], q10[val_mask], q50[val_mask], q90[val_mask],
         )
 
     fig = go.Figure()
@@ -293,11 +298,10 @@ def _make_lambda_fig(ticker, df, model):
     vix_raw = t_df["VIX_Close"].values.astype(float)
     sigma_raw = t_df["Realized_Vol_20d"].values.astype(float)
 
-    vix_z = (vix_raw - vix_raw.mean()) / (vix_raw.std() + 1e-8)
     sigma_z = (sigma_raw - sigma_raw.mean()) / (sigma_raw.std() + 1e-8)
 
     al = model.adaptive_loss
-    vix_ex = np.maximum(vix_z - al.vix_threshold, 0.0) / al.vix_scale
+    vix_ex = np.maximum(vix_raw - al.vix_threshold, 0.0) / al.vix_scale
     sig_t = np.maximum(sigma_z, 0.0) / al.sigma_scale
 
     lam_down = 1.0 + al.alpha_down * vix_ex + al.beta_down * sig_t
