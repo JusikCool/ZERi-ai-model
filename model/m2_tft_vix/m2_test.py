@@ -117,7 +117,7 @@ def run_validation_by_group(
 MAX_ENCODER_LENGTH = 60
 MAX_PREDICTION_LENGTH = 10
 DATA_CSV_PATH = "./tft_processed_panel_v1.csv"
-MODEL_PATH = "./model/m2/trial_23/m2_epoch=17_val_loss=0.0001.ckpt"
+MODEL_PATH = "./m2_epoch=17_val_loss=0.0001.ckpt"
 
 df = pd.read_csv(DATA_CSV_PATH, parse_dates=["Date"])
 df = df.sort_values(["group_id", "time_idx"]).reset_index(drop=True)
