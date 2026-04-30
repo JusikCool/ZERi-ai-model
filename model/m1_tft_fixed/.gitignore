@@ -1,0 +1,5 @@
+artifacts/
+runs/
+__pycache__/
+tft_vix/__pycache__/
+lightning_logs/
