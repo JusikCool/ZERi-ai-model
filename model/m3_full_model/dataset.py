@@ -14,7 +14,7 @@ GROUP_ID = "group_id"
 TIME_VARYING_KNOWN_CATEGORICALS = ["Month", "Day_of_Week"]
 
 TIME_VARYING_UNKNOWN_REALS = [
-    "Open", "High", "Low", "Close", "Volume",
+    "Target_Return_5d", "Open", "High", "Low", "Close", "Volume",
     "Dividends", "Stock Splits",
     "NASDAQ_Close", "VIX_Close",
     "FEDFUNDS", "UNRATE", "DTWEXBGS", "CPIAUCSL", "PCEPI",
@@ -61,7 +61,7 @@ def build_dataset(
         target_normalizer=GroupNormalizer(
             groups=[GROUP_ID], transformation=None
         ),
-        add_relative_time_idx=True,
+        add_relative_time_idx=False,
         add_target_scales=True,
         add_encoder_length=True,
         allow_missing_timesteps=True,
