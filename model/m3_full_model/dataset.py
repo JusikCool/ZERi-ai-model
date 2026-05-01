@@ -77,6 +77,98 @@ def build_dataset(
     return train_dataset, val_dataset
 
 
+def build_dataset_for_tide(
+    df: pd.DataFrame,
+    max_encoder_length: int = 60,
+    max_prediction_length: int = 10,
+    val_ratio: float = 0.2,
+) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
+    """
+    TiDE 전용 dataset 빌더.
+    TiDE는 future covariate (time_varying_known_*) 처리에 dataset 구성과 충돌하는
+    이슈가 있어서, future covariate (Month, Day_of_Week)를 제거한 dataset을 만든다.
+    나머지 설정은 build_dataset()과 동일.
+    """
+    cutoff = int(df[TIME_IDX].max() * (1 - val_ratio))
+
+    train_dataset = TimeSeriesDataSet(
+        df[df[TIME_IDX] <= cutoff],
+        time_idx=TIME_IDX,
+        target=TARGET,
+        group_ids=[GROUP_ID],
+        max_encoder_length=max_encoder_length,
+        max_prediction_length=max_prediction_length,
+        static_categoricals=[GROUP_ID],
+        # time_varying_known_categoricals 제거 (TiDE 호환성)
+        time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS,
+        target_normalizer=GroupNormalizer(
+            groups=[GROUP_ID], transformation=None
+        ),
+        add_relative_time_idx=False,
+        add_target_scales=True,
+        add_encoder_length=True,
+        allow_missing_timesteps=True,
+    )
+
+    val_dataset = TimeSeriesDataSet.from_dataset(
+        train_dataset,
+        df[df[TIME_IDX] > cutoff - max_encoder_length],
+        predict=True,
+        stop_randomization=True,
+    )
+
+    return train_dataset, val_dataset
+
+
+def build_dataset_for_deepar(
+    df: pd.DataFrame,
+    max_encoder_length: int = 60,
+    max_prediction_length: int = 10,
+    val_ratio: float = 0.2,
+) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
+    """
+    DeepAR 전용 dataset 빌더.
+    DeepAR은 'encoder/decoder variables가 target 외에 동일해야 한다'는 제약이 있어서,
+    target을 제외한 모든 covariate를 time_varying_known_reals로 옮긴다.
+    실제로 미래에 안다는 의미가 아니라, DeepAR의 autoregressive 동작 방식상
+    encoder와 decoder에 동일한 covariate를 제공해야 하기 때문.
+    """
+    cutoff = int(df[TIME_IDX].max() * (1 - val_ratio))
+
+    # target만 unknown으로 남기고, 나머지는 known reals로
+    target_only_unknown = [TARGET]
+    other_reals_as_known = [v for v in TIME_VARYING_UNKNOWN_REALS if v != TARGET]
+
+    train_dataset = TimeSeriesDataSet(
+        df[df[TIME_IDX] <= cutoff],
+        time_idx=TIME_IDX,
+        target=TARGET,
+        group_ids=[GROUP_ID],
+        max_encoder_length=max_encoder_length,
+        max_prediction_length=max_prediction_length,
+        static_categoricals=[GROUP_ID],
+        time_varying_known_categoricals=TIME_VARYING_KNOWN_CATEGORICALS,
+        time_varying_known_reals=other_reals_as_known,
+        time_varying_unknown_reals=target_only_unknown,
+        target_normalizer=GroupNormalizer(
+            groups=[GROUP_ID], transformation=None
+        ),
+        add_relative_time_idx=False,
+        add_target_scales=True,
+        add_encoder_length=True,
+        allow_missing_timesteps=True,
+    )
+
+    val_dataset = TimeSeriesDataSet.from_dataset(
+        train_dataset,
+        df[df[TIME_IDX] > cutoff - max_encoder_length],
+        predict=True,
+        stop_randomization=True,
+    )
+
+    return train_dataset, val_dataset
+
+
 def build_dataloaders(
     train_dataset: TimeSeriesDataSet,
     val_dataset: TimeSeriesDataSet,
