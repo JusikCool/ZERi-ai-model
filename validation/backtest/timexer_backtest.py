@@ -20,6 +20,10 @@ CHECKPOINT_DIR = Path("model/saved")
 BEST_PARAMS_PATH = CHECKPOINT_DIR / "best_params_timexer.json"
 COVID_START = "2020-01-01"
 COVID_END = "2021-01-01"
+UKRAINE_INFLATION_START = "2022-02-01"
+UKRAINE_INFLATION_END = "2022-07-01"
+TRUMP_TARIFF_START = "2025-04-01"
+TRUMP_TARIFF_END = "2025-05-31"
 
 
 def _load_best_params() -> dict:
@@ -165,7 +169,7 @@ def rolling_window_backtest(
     return report
 
 
-def covid_backtest(
+def period_backtest(
     df: pd.DataFrame,
     config: dict,
     start: str = COVID_START,
@@ -252,3 +256,28 @@ def covid_backtest(
     )
     report["period"] = f"{start} ~ {end}"
     return report
+
+def covid_backtest(
+    df: pd.DataFrame,
+    config: dict,
+    start: str = COVID_START,
+    end: str = COVID_END,
+) -> pd.DataFrame:
+    return period_backtest(df, config, start, end)
+
+def ukraine_inflation_backtest(
+    df: pd.DataFrame,
+    config: dict,
+    start: str = UKRAINE_INFLATION_START,
+    end: str = UKRAINE_INFLATION_END,
+) -> pd.DataFrame:
+    return period_backtest(df, config, start, end)
+ 
+ 
+def trump_tariff_backtest(
+    df: pd.DataFrame,
+    config: dict,
+    start: str = TRUMP_TARIFF_START,
+    end: str = TRUMP_TARIFF_END,
+) -> pd.DataFrame:
+    return period_backtest(df, config, start, end)
