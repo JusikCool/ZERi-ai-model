@@ -261,6 +261,40 @@ def main():
     covid_report.to_csv(covid_results_path, index=False)
     print(f"\n결과 저장: {covid_results_path}")
 
+    print("\n[5단계] 우크라이나 전쟁 + 인플레이션 구간 백테스트 (2022-02-01 ~ 2022-07-01)")
+    ukraine_report = ukraine_inflation_backtest(df, config)
+    print("\n" + "=" * 60)
+    print("[우크라이나 전쟁 + 인플레이션 구간 백테스트 결과 - DeepAR] Kupiec POF Test")
+    print("=" * 60)
+    print(ukraine_report.to_string(index=False))
+ 
+    ukraine_vr_pass = ukraine_report["vr_pass"].sum()
+    ukraine_kupiec_pass = ukraine_report["kupiec_pass"].sum()
+    ukraine_total = len(ukraine_report)
+    print(f"\nViolation Rate Pass: {ukraine_vr_pass}/{ukraine_total}")
+    print(f"Kupiec Pass:         {ukraine_kupiec_pass}/{ukraine_total}")
+ 
+    ukraine_results_path = Path("model/saved/ukraine_inflation_backtest_results.csv")
+    ukraine_report.to_csv(ukraine_results_path, index=False)
+    print(f"\n결과 저장: {ukraine_results_path}")
+ 
+    print("\n[6단계] 트럼프 관세 충격 구간 백테스트 (2025-04-01 ~ 2025-05-31)")
+    tariff_report = trump_tariff_backtest(df, config)
+    print("\n" + "=" * 60)
+    print("[트럼프 관세 충격 구간 백테스트 결과 - DeepAR] Kupiec POF Test")
+    print("=" * 60)
+    print(tariff_report.to_string(index=False))
+ 
+    tariff_vr_pass = tariff_report["vr_pass"].sum()
+    tariff_kupiec_pass = tariff_report["kupiec_pass"].sum()
+    tariff_total = len(tariff_report)
+    print(f"\nViolation Rate Pass: {tariff_vr_pass}/{tariff_total}")
+    print(f"Kupiec Pass:         {tariff_kupiec_pass}/{tariff_total}")
+ 
+    tariff_results_path = Path("model/saved/trump_tariff_backtest_results.csv")
+    tariff_report.to_csv(tariff_results_path, index=False)
+    print(f"\n결과 저장: {tariff_results_path}")
+
     print("\n전체 파이프라인 완료 (DeepAR).")
 
 
