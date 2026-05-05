@@ -1,4 +1,5 @@
 import glob
+import json
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,7 @@ from model.m3_full_model.model import M3FullModel
 from validation.kupiec.kupiec import run_validation_by_group
 
 CHECKPOINT_DIR = Path("model/saved")
+BEST_PARAMS_PATH = CHECKPOINT_DIR / "best_params.json"
 COVID_START = "2020-01-01"
 COVID_END = "2021-01-01"
 UKRAINE_INFLATION_START = "2022-02-01"
@@ -23,6 +25,51 @@ UKRAINE_INFLATION_END = "2022-07-01"
 TRUMP_TARIFF_START = "2025-04-01"
 TRUMP_TARIFF_END = "2025-05-31"
 
+
+def _load_best_params() -> dict:
+    """학습 시 저장된 TFT best params 로드. 없으면 빈 dict."""
+    if BEST_PARAMS_PATH.exists():
+        with open(BEST_PARAMS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+ 
+ 
+def _build_model_kwargs(model_cfg: dict, vix_mean: float, vix_std: float) -> dict:
+    """
+    TFT용 from_dataset kwargs 빌더.
+    우선순위: best_params.json > config["model"]
+    학습 시 사용한 하이퍼파라미터와 동일한 구조로 모델을 만들어야 체크포인트 로드 가능.
+    """
+    best = _load_best_params()
+ 
+    def pick(key, default=None):
+        if key in best:
+            return best[key]
+        return model_cfg.get(key, default)
+ 
+    kwargs = dict(
+        learning_rate=pick("learning_rate", model_cfg["learning_rate"]),
+        hidden_size=pick("hidden_size", model_cfg["hidden_size"]),
+        attention_head_size=pick("attention_head_size", model_cfg["attention_head_size"]),
+        dropout=pick("dropout", model_cfg["dropout"]),
+        quantiles=model_cfg["quantiles"],
+        vix_threshold=model_cfg["vix_threshold"],
+        vix_mean=vix_mean,
+        vix_std=vix_std,
+    )
+ 
+    # hidden_continuous_size 같은 추가 파라미터도 best_params에 있으면 반영
+    if "hidden_continuous_size" in best:
+        kwargs["hidden_continuous_size"] = best["hidden_continuous_size"]
+    elif "hidden_continuous_size" in model_cfg:
+        kwargs["hidden_continuous_size"] = model_cfg["hidden_continuous_size"]
+ 
+    # AdaptivePinballLoss 가중치 best_params에 있으면 반영
+    for opt_key in ("alpha_down", "beta_down", "alpha_up", "beta_up", "crossing_weight"):
+        if opt_key in best:
+            kwargs[opt_key] = best[opt_key]
+ 
+    return kwargs
 
 def rolling_window_backtest(
     df: pd.DataFrame,
@@ -45,17 +92,8 @@ def rolling_window_backtest(
         max_prediction_length=data_cfg["horizon"],
     )
 
-    model = M3FullModel.from_dataset(
-        dataset=train_ds,
-        learning_rate=model_cfg["learning_rate"],
-        hidden_size=model_cfg["hidden_size"],
-        attention_head_size=model_cfg["attention_head_size"],
-        dropout=model_cfg["dropout"],
-        quantiles=model_cfg["quantiles"],
-        vix_threshold=model_cfg["vix_threshold"],
-        vix_mean=vix_mean,
-        vix_std=vix_std,
-    )
+    model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
+    model = M3FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
@@ -141,17 +179,8 @@ def period_backtest(
         max_prediction_length=data_cfg["horizon"],
     )
 
-    model = M3FullModel.from_dataset(
-        dataset=train_ds,
-        learning_rate=model_cfg["learning_rate"],
-        hidden_size=model_cfg["hidden_size"],
-        attention_head_size=model_cfg["attention_head_size"],
-        dropout=model_cfg["dropout"],
-        quantiles=model_cfg["quantiles"],
-        vix_threshold=model_cfg["vix_threshold"],
-        vix_mean=vix_mean,
-        vix_std=vix_std,
-    )
+    model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
+    model = M3FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
