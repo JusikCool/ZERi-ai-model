@@ -5,7 +5,7 @@ from pytorch_forecasting import TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
 from torch.utils.data import DataLoader
 
-DATA_PATH = Path("data/raw/tft_processed_panel_v1.csv")
+DATA_PATH = Path("data/raw/tft_processed_panel_v2.csv")
 
 TARGET = "Target_Return_5d"
 TIME_IDX = "time_idx"
@@ -43,7 +43,7 @@ def load_data(data_path: Path = DATA_PATH) -> pd.DataFrame:
 def build_dataset(
     df: pd.DataFrame,
     max_encoder_length: int = 60,
-    max_prediction_length: int = 10,
+    max_prediction_length: int = 30,
     val_ratio: float = 0.2,
 ) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
     cutoff = int(df[TIME_IDX].max() * (1 - val_ratio))

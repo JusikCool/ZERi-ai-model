@@ -3,11 +3,11 @@ data:
   start_date: "2015-01-01"
   end_date: "2025-01-01"
   window_size: 60
-  horizon: 10
+  horizon: 30
   vol_window: 20        # 실현변동성(σ) Rolling Window
 
 model:
-  quantiles: [0.1, 0.5, 0.9]
+  quantiles: [0.1, 0.2, 0.3, 0.4, 0.5]
   vix_threshold: 25     # λt 선형 증가 시작 임계값 (raw VIX 기준, 주요 시장 위기 구간 하한선)
   hidden_size: 64
   attention_head_size: 4

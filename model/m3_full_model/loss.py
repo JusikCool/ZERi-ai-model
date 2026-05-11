@@ -16,7 +16,7 @@ class AdaptivePinballLoss(nn.Module):
         crossing_weight: float = 0.1,
     ):
         super().__init__()
-        self.quantiles = quantiles or [0.1, 0.5, 0.9]
+        self.quantiles = quantiles or [0.1, 0.2, 0.3, 0.4, 0.5]
         self.vix_threshold = vix_threshold
         self.vix_scale = vix_scale
         self.sigma_scale = sigma_scale
