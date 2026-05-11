@@ -76,7 +76,7 @@ def run_optuna(config: dict, n_trials: int) -> dict:
         beta_down = trial.suggest_float("beta_down", 0.5, 3.0)
         alpha_up = trial.suggest_float("alpha_up", 0.5, 3.0)
         beta_up = trial.suggest_float("beta_up", 0.5, 3.0)
-        crossing_weight = trial.suggest_float("crossing_weight", 0.01, 0.5)
+        crossing_weight = trial.suggest_float("crossing_weight", 1e-3, 1.0, log=True)
 
         model = M3FullModel.from_dataset(
             dataset=train_ds,
