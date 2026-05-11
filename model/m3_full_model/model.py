@@ -46,7 +46,7 @@ class M3FullModel(pl.LightningModule):
         beta_up: float = 1.0,
         crossing_weight: float = 0.1,
     ) -> "M3FullModel":
-        quantiles = quantiles or [0.1, 0.2, 0.3, 0.4, 0.5]
+        quantiles = quantiles or [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
         reals: list[str] = dataset.reals
         vix_idx = reals.index("VIX_Close")

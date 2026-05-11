@@ -98,7 +98,7 @@ def run_optuna(config: dict, n_trials: int) -> dict:
         trainer = pl.Trainer(
             max_epochs=model_cfg["max_epochs"],
             callbacks=[EarlyStopping(monitor="val_loss", patience=10, mode="min")],
-            enable_progress_bar=False,
+            enable_progress_bar=True,
             logger=pl.loggers.CSVLogger(LOG_DIR, name="optuna_trials"),
             gradient_clip_val=0.1,
             accelerator="gpu",
