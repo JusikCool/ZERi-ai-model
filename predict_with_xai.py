@@ -1,6 +1,6 @@
 """
 학습된 TFT 체크포인트로 매일 production 추론:
-  - yfinance + FRED 에서 6 종목의 최근 데이터를 직접 수집
+  - yfinance + FRED 에서 50 종목의 최근 데이터를 직접 수집
   - fresh data 의 last_date T 기준, 향후 10영업일(T+1 ~ T+10) 5일 누적 수익률 분위수
     (T = today - 5 거래일. Target_Return_5d 가 valid 한 마지막 일자.
      처음 ~5일 예측은 실현 시나리오와 비교 가능, 마지막 ~5일은 진짜 미래)
@@ -8,11 +8,11 @@
   - 분위수/변수 중요도/attention 패턴을 자동으로 한국어 줄글로 해설
 
 데이터 흐름:
-  - 학습 CSV (data/raw/tft_processed_panel_v1.csv): train_ds 템플릿 복원용.
+  - 학습 CSV (dataset.py 의 DATA_PATH 가 가리키는 파일): train_ds 템플릿 복원용.
     GroupNormalizer 가 학습 시점 종목별 mean/std 로 fit 되어 있고,
     체크포인트 weights 와 정합되므로 normalizer 상태가 반드시 필요.
-  - fetch_fresh_data(): yfinance + FRED 에서 최근 ~150 일 직접 수집.
-    build_dataset_50tickers.py 와 동일한 처리 (dropna → last 5 trailing 제거).
+  - fetch_fresh_data(): yfinance + FRED 에서 직접 수집.
+    build_dataset_50tickers.py 와 동일한 처리 (풀 history → dropna → 마지막 N 거래일 슬라이스).
     실제 추론 입력으로 사용. CSV 와 동일한 컬럼/형식.
 
 추론 흐름:
@@ -34,10 +34,10 @@ Production 사용:
 
 출력:
   model/saved/
-    predict_xai_returns.csv             # 6 종목 × 10일 × 3분위수
-    predict_xai_summary_<TICKER>.png    # 종목별 통합 figure
+    predict_xai_returns.csv             # 50 종목 × 10일 × 19분위수
+    predict_xai_summary_<TICKER>.png    # 종목별 통합 figure (Q0.5 + Q0.05~Q0.5 하방 밴드)
     predict_xai_summary_<TICKER>.txt    # 종목별 텍스트 해설
-    predict_xai_report.txt              # 6 종목 통합 보고서
+    predict_xai_report.txt              # 50 종목 통합 보고서
     xai/
       xai_ALL_*.png, xai_<TICKER>_*.png # 변수 중요도/attention
       xai_summary.csv
@@ -93,8 +93,27 @@ TARGET = "Target_Return_5d"
 # ============================================================
 FRED_API_KEY = "YOUR_FRED_API_KEY_HERE"   # ← 본인 key 로 교체 (또는 환경변수에서 로드)
 
-# 학습 시 사용한 6 종목 (반드시 동일해야 normalizer 가 매핑됨)
-TICKERS_FRESH = ["AAPL", "GOOGL", "TSLA", "META", "NVDA", "ORCL"]
+# 학습 시 사용한 50 종목 (반드시 학습 데이터셋과 동일해야 normalizer 가 매핑됨)
+TICKERS_FRESH = [
+    # 기존 6개
+    "AAPL", "GOOGL", "TSLA", "META", "NVDA", "ORCL",
+    # 메가캡 테크 (10)
+    "MSFT", "AMZN", "AVGO", "NFLX", "CSCO", "ADBE", "INTC", "AMD", "QCOM", "TXN",
+    # 소프트웨어/SaaS (5)
+    "INTU", "ADSK", "CTSH", "CDNS", "SNPS",
+    # 반도체 (9)
+    "AMAT", "LRCX", "KLAC", "MCHP", "MRVL", "MU", "ASML", "NXPI", "ON",
+    # 인터넷/게임 (4)
+    "EBAY", "BKNG", "EA", "TTWO",
+    # 헬스케어/바이오 (7)
+    "AMGN", "GILD", "REGN", "VRTX", "BIIB", "ISRG", "IDXX",
+    # 소비재 (5)
+    "SBUX", "COST", "MDLZ", "PEP", "MAR",
+    # 금융/결제 (1)
+    "PAYX",
+    # 유틸리티/통신 (3)
+    "CMCSA", "CHTR", "TMUS",
+]
 
 # build_dataset_50tickers.py 와 동일하게 풀 history 를 fetch 한 뒤,
 # 마지막에 group 별로 N 거래일만 keep.
@@ -189,16 +208,15 @@ def generate_text_explanation(
     parts.append(f"  (기준일 T = {last_obs_date.date()}, 예측 구간 = T+1 ~ T+10)")
     parts.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    # ---- 1. 수익률 전망 ----
-    q1 = fc_g["Q0.1_return_5d"].to_numpy()
+    # ---- 1. 수익률 전망 (Q0.05 ~ Q0.5 하방 시나리오 + 중앙) ----
+    q_low = fc_g["Q0.05_return_5d"].to_numpy()
     q5 = fc_g["Q0.5_return_5d"].to_numpy()
-    q9 = fc_g["Q0.9_return_5d"].to_numpy()
 
     median_avg = float(np.mean(q5))
     median_min, median_max = float(np.min(q5)), float(np.max(q5))
-    band_avg = float(np.mean(q9 - q1))
-    upside_avg = float(np.mean(q9 - q5))
-    downside_avg = float(np.mean(q5 - q1))
+    q_low_avg = float(np.mean(q_low))
+    q_low_min, q_low_max = float(np.min(q_low)), float(np.max(q_low))
+    downside_band_avg = float(np.mean(q5 - q_low))  # Q0.05 → Q0.5 폭
 
     if median_avg > 0.005:
         direction = "상승"
@@ -207,38 +225,39 @@ def generate_text_explanation(
     else:
         direction = "횡보"
 
-    if upside_avg > downside_avg * 1.15:
-        skew_desc = "상방 비대칭 (낙관적 시나리오 폭이 더 큼)"
-    elif downside_avg > upside_avg * 1.15:
-        skew_desc = "하방 비대칭 (비관적 시나리오 폭이 더 큼)"
-    else:
-        skew_desc = "거의 대칭"
-
+    # 하방 폭이 최근 실현 변동성 대비 어느 수준인지
+    # (정규분포 가정 하 Q0.05 ≈ -1.645σ → 한쪽 꼬리 폭 ~1.645σ 가 기대치)
     hist_std = float(hist_g["Target_Return_5d"].std()) if len(hist_g) > 0 else 0.0
     band_ratio_desc = ""
     if hist_std > 0:
-        ratio = band_avg / (4 * hist_std)
+        ratio = downside_band_avg / (1.645 * hist_std)
         if ratio > 1.2:
-            band_ratio_desc = f" 최근 60일 실현 변동성 대비 약 {ratio:.1f}배로 넓어 모델이 큰 불확실성을 반영하고 있습니다."
+            band_ratio_desc = (
+                f" 정규분포 가정 대비 약 {ratio:.1f}배로 넓어 "
+                f"하방 리스크에 대한 모델의 우려가 큽니다."
+            )
         elif ratio < 0.8:
-            band_ratio_desc = f" 최근 60일 실현 변동성 대비 약 {ratio:.1f}배로 좁아 모델 확신이 비교적 강합니다."
+            band_ratio_desc = (
+                f" 정규분포 가정 대비 약 {ratio:.1f}배로 좁아 "
+                f"하방 리스크에 대한 모델 확신이 비교적 강합니다."
+            )
         else:
             band_ratio_desc = f" 최근 60일 실현 변동성과 유사한 수준입니다."
 
     parts.append("")
-    parts.append("◆ 수익률 전망")
+    parts.append("◆ 수익률 전망 (중앙 시나리오 + 하방 분위수)")
     parts.append(
         f"  Q0.5(중앙 시나리오) 10일 평균은 {median_avg*100:+.2f}% 로, "
         f"향후 2주 동안 5일 단위 누적 수익률이 대체로 {direction} 흐름을 보일 것으로 모델이 추정합니다. "
         f"개별 시점별 Q0.5 는 {median_min*100:+.2f}% ~ {median_max*100:+.2f}% 범위에 위치합니다."
     )
     parts.append(
-        f"  Q0.1~Q0.9 분위수 밴드의 평균 폭은 {band_avg*100:.2f}%p 입니다."
-        + band_ratio_desc
+        f"  Q0.05(하위 5% 극단 비관 시나리오) 10일 평균은 {q_low_avg*100:+.2f}%, "
+        f"개별 시점 범위 {q_low_min*100:+.2f}% ~ {q_low_max*100:+.2f}% 입니다."
     )
     parts.append(
-        f"  비대칭성: {skew_desc} "
-        f"(상방 폭 평균 {upside_avg*100:.2f}%p, 하방 폭 평균 {downside_avg*100:.2f}%p)."
+        f"  Q0.05~Q0.5 하방 밴드의 평균 폭은 {downside_band_avg*100:.2f}%p 입니다."
+        + band_ratio_desc
     )
 
     # ---- 2. 변수 중요도 (encoder) ----
@@ -635,6 +654,107 @@ def _save_attention_plot(attention: torch.Tensor, title: str, out_path: Path) ->
     plt.close(fig)
 
 
+def _save_raw_xai_csv(
+    g: str,
+    out_g: dict,
+    encoder_vars: list[str],
+    decoder_vars: list[str],
+    static_vars: list[str],
+    quantiles: list[float],
+    last_obs_date: pd.Timestamp,
+    raw_dir: Path,
+) -> None:
+    """
+    종목별 raw XAI 텐서를 정제(reduction) 없이 그대로 CSV 로 저장.
+
+    출력 파일 (raw_dir 아래):
+      - {g}_predictions.csv               # (decoder_len × n_quantiles) 분위수 예측
+      - {g}_encoder_variable_weights.csv  # (encoder_len × n_enc_vars) 시점별 변수 선택
+      - {g}_decoder_variable_weights.csv  # (decoder_len × n_dec_vars) 시점별 변수 선택
+      - {g}_static_variable_weights.csv   # (n_static_vars,) 정적 변수 선택
+
+    interpret_output 의 reduction="sum" 으로 평균 내기 전 원형 텐서.
+    이 값들의 시간축 평균이 기존 막대그래프(*_variables.png) 의 importance 값.
+    """
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    def _to_2d(t):
+        """(batch, ...) 텐서를 (time, n_vars) 또는 (time, n_quantiles) 형태로 환원.
+
+        주의: pytorch_forecasting TFT 의 raw output 에서
+          - encoder_variables, decoder_variables: (batch, time, 1, n_vars)
+            (variable selection 의 singleton 차원이 -2 위치에 들어있음)
+          - prediction: (batch, time, n_quantiles)  (singleton 없음)
+        따라서 np.squeeze 로 모든 size-1 차원을 먼저 제거한 뒤,
+        남은 batch 차원이 있으면 mean 으로 reduce.
+        """
+        arr = t.detach().cpu().numpy()
+        arr = np.squeeze(arr)  # 모든 size-1 차원 (batch=1, VSN singleton) 제거
+        if arr.ndim >= 3:
+            arr = arr.mean(axis=0)  # 남은 batch 차원이 있으면 평균
+        return arr
+
+    # 1) 예측 분위수 (decoder_len × n_quantiles)
+    if "prediction" in out_g and isinstance(out_g["prediction"], torch.Tensor):
+        pred = _to_2d(out_g["prediction"])  # (decoder_len, n_quantiles)
+        if pred.ndim == 2:
+            future_dates = pd.bdate_range(
+                start=last_obs_date + pd.Timedelta(days=1), periods=pred.shape[0]
+            )
+            cols = [f"Q{q}" for q in quantiles[:pred.shape[1]]]
+            df_p = pd.DataFrame(
+                pred, index=[d.date() for d in future_dates], columns=cols
+            )
+            df_p.index.name = "Date"
+            df_p.to_csv(raw_dir / f"{g}_predictions.csv")
+
+    # 2) Encoder variable selection weights (encoder_len × n_enc_vars)
+    if "encoder_variables" in out_g and isinstance(
+        out_g["encoder_variables"], torch.Tensor
+    ):
+        enc = _to_2d(out_g["encoder_variables"])
+        if enc.ndim == 2:
+            n_time, n_var = enc.shape
+            cols = encoder_vars[:n_var] if encoder_vars else [f"var_{i}" for i in range(n_var)]
+            idx = [f"T-{n_time - i}" for i in range(n_time)]  # T-60 … T-1
+            df_e = pd.DataFrame(enc, index=idx, columns=cols)
+            df_e.index.name = "encoder_step"
+            df_e.to_csv(raw_dir / f"{g}_encoder_variable_weights.csv")
+
+    # 3) Decoder variable selection weights (decoder_len × n_dec_vars)
+    if "decoder_variables" in out_g and isinstance(
+        out_g["decoder_variables"], torch.Tensor
+    ):
+        dec = _to_2d(out_g["decoder_variables"])
+        if dec.ndim == 2 and dec.shape[1] > 0:
+            n_time, n_var = dec.shape
+            cols = decoder_vars[:n_var] if decoder_vars else [f"var_{i}" for i in range(n_var)]
+            future_dates = pd.bdate_range(
+                start=last_obs_date + pd.Timedelta(days=1), periods=n_time
+            )
+            df_d = pd.DataFrame(
+                dec, index=[d.date() for d in future_dates], columns=cols
+            )
+            df_d.index.name = "Date"
+            df_d.to_csv(raw_dir / f"{g}_decoder_variable_weights.csv")
+
+    # 4) Static variable selection weights (n_static_vars,)
+    if "static_variables" in out_g and isinstance(
+        out_g["static_variables"], torch.Tensor
+    ):
+        stat = out_g["static_variables"].detach().cpu().numpy()
+        if stat.ndim >= 2:
+            stat = stat.mean(axis=0)
+        stat = stat.flatten()
+        if static_vars and len(stat) > 0:
+            n = min(len(stat), len(static_vars))
+            df_s = pd.DataFrame({
+                "variable": static_vars[:n],
+                "weight": stat[:n],
+            })
+            df_s.to_csv(raw_dir / f"{g}_static_variable_weights.csv", index=False)
+
+
 def _save_combined_summary(
     g: str,
     fc: pd.DataFrame,
@@ -659,14 +779,14 @@ def _save_combined_summary(
     x_future = pd.to_datetime(fc["Date"])
     ax_ret.plot(
         x_future, fc["Q0.5_return_5d"],
-        color="C0", marker="o", label="Q0.5 forecast",
+        color="C0", marker="o", label="Q0.5 forecast (median)",
     )
     ax_ret.fill_between(
-        x_future, fc["Q0.1_return_5d"], fc["Q0.9_return_5d"],
-        color="C0", alpha=0.2, label="Q0.1 ~ Q0.9 band",
+        x_future, fc["Q0.05_return_5d"], fc["Q0.5_return_5d"],
+        color="C0", alpha=0.2, label="Q0.05 ~ Q0.5 downside band",
     )
     ax_ret.set_title(
-        f"{g}: T+1 ~ T+10 forecast of 5-day cumulative return quantiles"
+        f"{g}: T+1 ~ T+{len(fc)} forecast — Q0.5 + Q0.05~Q0.5 downside band"
     )
     ax_ret.set_ylabel("5-day return")
     ax_ret.legend(loc="best", fontsize=9)
@@ -914,6 +1034,13 @@ def main() -> None:
 
         # 텍스트 해설 생성 (종목별 .txt + 통합 보고서용)
         last_obs_date = df[df[GROUP_ID] == g]["Date"].max()
+
+        # raw XAI 텐서를 정제 전 형태로 CSV 저장
+        _save_raw_xai_csv(
+            g, out_g, encoder_vars, decoder_vars, static_vars,
+            quantiles, last_obs_date, XAI_DIR / "raw",
+        )
+
         explanation = generate_text_explanation(
             g, fc_g, hist_g, interp_g, encoder_vars, last_obs_date
         )
@@ -960,6 +1087,7 @@ def main() -> None:
     print(f"  - predict_xai_summary_*.txt    (종목별 텍스트 해설)")
     print(f"  - predict_xai_report.txt       (모든 종목 통합 보고서)")
     print(f"  - xai/                         (변수 중요도/attention)")
+    print(f"  - xai/raw/                     (정제 전 raw XAI 텐서 CSV)")
     print("\n완료.")
 
 
