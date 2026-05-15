@@ -17,10 +17,10 @@ ensemble.py 에서 그대로 merge 가능:
   1) yfinance → 종목별 OHLCV (full history)
   2) 마지막 5거래일 trim → TFT 의 T 와 정렬 (TFT 는 Target_Return_5d 의 NaN 으로 자동 trim)
   3) 마지막 60거래일을 Kronos 입력 window 로 사용
-  4) Kronos 로 35 거래일 OHLCV 의 30 stochastic sample path 생성
+  4) Kronos 로 35 거래일 OHLCV 의 10 stochastic sample path 생성
      (pred_len = 30 horizon + 5 buffer for 5-day forward return)
   5) 각 path 의 close 에서 5-day forward return 계산: r[t] = close[t+5] / close[t] - 1
-  6) 30 path 분포의 경험적 분위수 (Q0.05 ~ Q0.95, 19개) 산출
+  6) 10 path 분포의 경험적 분위수 (Q0.05 ~ Q0.95, 19개) 산출
 
 준비:
   git clone https://github.com/shiyu-coder/Kronos
@@ -30,9 +30,9 @@ ensemble.py 에서 그대로 merge 가능:
 실행:
   python predict_kronos.py
 
-GPU 권장. Kronos-small + 50종목 × 30 sample 기준:
-  GPU (RTX 3060+): ~30-45분
-  CPU: 4-8시간 (테스트시 SAMPLE_COUNT 줄이거나 TICKERS slice)
+Kronos-small + 50종목 × 10 sample 기준 예상 시간:
+  GPU (RTX 3060+): ~10-15분
+  CPU: ~25-30분
 """
 
 import sys
@@ -77,7 +77,7 @@ WINDOW_SIZE = 60                       # 인코더 window (TFT 와 동일)
 HORIZON = 30                           # 예측 시점 수 (TFT 와 동일)
 N_BUFFER_5D = 5                        # 5일 forward return 계산용 추가 예측
 PRED_LEN = HORIZON + N_BUFFER_5D       # = 35
-SAMPLE_COUNT = 30                      # stochastic path 개수 (테스트시 줄여도 됨)
+SAMPLE_COUNT = 10                      # stochastic path 개수 (속도/분위수 안정성 trade-off)
 QUANTILES = [round(0.05 * i, 2) for i in range(1, 20)]  # 0.05, 0.10, ..., 0.95
 
 KRONOS_MODEL_NAME = "NeoQuasar/Kronos-small"
