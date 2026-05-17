@@ -71,14 +71,14 @@ def _patched_get_attention_mask(self, encoder_lengths, **kwargs):
 
 TemporalFusionTransformer.get_attention_mask = _patched_get_attention_mask
 
-from model.m3_full_model.dataset import (
+from model.m4.dataset import (
     GROUP_ID,
     TIME_IDX,
     build_dataset,
     get_vix_stats,
     load_data,
 )
-from model.m3_full_model.model import M3FullModel
+from model.m4.model import M4FullModel
 from validation.backtest.backtest import _build_model_kwargs
 
 CONFIG_PATH = Path("configs/config.yaml")
@@ -864,7 +864,7 @@ def main() -> None:
     )
 
     model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
-    model = M3FullModel.from_dataset(dataset=train_ds, **model_kwargs)
+    model = M4FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
