@@ -21,7 +21,6 @@ from validation.kupiec.coverage_tests import (
 )
 
 CHECKPOINT_DIR = Path("model/saved")
-BEST_PARAMS_PATH = CHECKPOINT_DIR / "best_params.json"
 COVID_START = "2020-01-01"
 COVID_END = "2021-01-01"
 UKRAINE_INFLATION_START = "2022-02-01"
@@ -29,22 +28,82 @@ UKRAINE_INFLATION_END = "2022-07-01"
 TRUMP_TARIFF_START = "2025-04-01"
 TRUMP_TARIFF_END = "2025-05-31"
 
+# ===== M4: mode 별 파일 경로 =====
+VOL_GROUP_MAP_PATH = Path("data/raw/vol_group_map.json")
+GROUP_LABELS = ["low_vol", "mid_vol", "high_vol"]
 
-def _load_best_params() -> dict:
-    """학습 시 저장된 TFT best params 로드. 없으면 빈 dict."""
-    if BEST_PARAMS_PATH.exists():
-        with open(BEST_PARAMS_PATH, encoding="utf-8") as f:
-            return json.load(f)
+
+def _best_params_path(mode: str = None) -> Path:
+    if mode is None:
+        return CHECKPOINT_DIR / "best_params.json"
+    return CHECKPOINT_DIR / f"best_params_{mode}.json"
+
+
+def _load_best_params(mode: str = None) -> dict:
+    """mode 별 best_params 로드."""
+    path = _best_params_path(mode)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            best = json.load(f)
+        print(f"[backtest] best_params 로드: {path}")
+        return best
+    print(f"[backtest] ⚠️ {path} 없음 → config default 사용")
     return {}
 
 
-def _build_model_kwargs(model_cfg: dict, vix_mean: float, vix_std: float) -> dict:
+def _load_vol_group_map() -> dict:
+    if VOL_GROUP_MAP_PATH.exists():
+        with open(VOL_GROUP_MAP_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def _build_ticker_to_vol_group_idx(
+    panel_df: pd.DataFrame, vol_group_map: dict
+) -> torch.Tensor:
+    """run_full_pipeline_m4 와 동일 로직 — alphabetic ticker order 기준."""
+    if vol_group_map is None:
+        return None
+    panel_tickers_sorted = sorted(panel_df["group_id"].unique())
+    label_to_idx = {l: i for i, l in enumerate(GROUP_LABELS)}
+    default_label = GROUP_LABELS[len(GROUP_LABELS) // 2]
+
+    vg_list = []
+    for ticker in panel_tickers_sorted:
+        vg_str = vol_group_map.get(ticker, default_label)
+        if vg_str not in label_to_idx:
+            vg_str = default_label
+        vg_list.append(label_to_idx[vg_str])
+    return torch.tensor(vg_list, dtype=torch.long)
+
+
+def _find_checkpoint(mode: str = None) -> str:
+    """mode 별 checkpoint 패턴 검색."""
+    if mode is not None:
+        pattern = str(CHECKPOINT_DIR / f"{mode}_best_*.ckpt")
+        ckpts = glob.glob(pattern)
+        if ckpts:
+            return sorted(ckpts)[-1]
+        print(f"[backtest] ⚠️ '{pattern}' 매치 없음 → 전체 검색 fallback")
+    ckpts = glob.glob(str(CHECKPOINT_DIR / "*.ckpt"))
+    if not ckpts:
+        raise FileNotFoundError(f"{CHECKPOINT_DIR} 에 체크포인트 없음")
+    return sorted(ckpts)[-1]
+
+
+def _build_model_kwargs(
+    model_cfg: dict,
+    vix_mean: float,
+    vix_std: float,
+    mode: str = None,
+    df: pd.DataFrame = None,
+    vol_group_map: dict = None,
+) -> dict:
     """
-    TFT용 from_dataset kwargs 빌더.
-    우선순위: best_params.json > config["model"]
-    학습 시 사용한 하이퍼파라미터와 동일한 구조로 모델을 만들어야 체크포인트 로드 가능.
+    M4FullModel.from_dataset 의 kwargs 생성. mode 별 분기.
+    우선순위: best_params_{mode}.json > config["model"]
     """
-    best = _load_best_params()
+    best = _load_best_params(mode)
 
     def pick(key, default=None):
         if key in best:
@@ -54,31 +113,51 @@ def _build_model_kwargs(model_cfg: dict, vix_mean: float, vix_std: float) -> dic
     kwargs = dict(
         learning_rate=pick("learning_rate", model_cfg["learning_rate"]),
         hidden_size=pick("hidden_size", model_cfg["hidden_size"]),
-        attention_head_size=pick("attention_head_size", model_cfg["attention_head_size"]),
+        attention_head_size=pick(
+            "attention_head_size", model_cfg["attention_head_size"]
+        ),
         dropout=pick("dropout", model_cfg["dropout"]),
         quantiles=model_cfg["quantiles"],
         vix_threshold=model_cfg["vix_threshold"],
         vix_mean=vix_mean,
         vix_std=vix_std,
+        use_garch_sigma=True,
+        group_labels=GROUP_LABELS,
     )
 
-    # hidden_continuous_size 같은 추가 파라미터도 best_params에 있으면 반영
     if "hidden_continuous_size" in best:
         kwargs["hidden_continuous_size"] = best["hidden_continuous_size"]
     elif "hidden_continuous_size" in model_cfg:
         kwargs["hidden_continuous_size"] = model_cfg["hidden_continuous_size"]
 
-    # AdaptivePinballLoss 가중치 best_params에 있으면 반영
-    for opt_key in ("alpha_down", "beta_down", "alpha_up", "beta_up", "crossing_weight"):
-        if opt_key in best:
-            kwargs[opt_key] = best[opt_key]
+    if "crossing_weight" in best:
+        kwargs["crossing_weight"] = best["crossing_weight"]
+
+    # mode 별 α/β
+    if mode == "m4_combined":
+        try:
+            kwargs["alpha_down_by_group"] = {g: best[f"alpha_down_{g}"] for g in GROUP_LABELS}
+            kwargs["beta_down_by_group"] = {g: best[f"beta_down_{g}"] for g in GROUP_LABELS}
+            kwargs["alpha_up_by_group"] = {g: best[f"alpha_up_{g}"] for g in GROUP_LABELS}
+            kwargs["beta_up_by_group"] = {g: best[f"beta_up_{g}"] for g in GROUP_LABELS}
+        except KeyError as e:
+            raise KeyError(
+                f"m4_combined best_params 에 group 별 α/β key 누락: {e}. "
+                f"best_params_m4_combined.json 을 확인하세요."
+            )
+        kwargs["ticker_to_vol_group_idx"] = _build_ticker_to_vol_group_idx(
+            df, vol_group_map
+        )
+    else:
+        # m4_garch (또는 mode=None 기본)
+        for k in ("alpha_down", "beta_down", "alpha_up", "beta_up"):
+            if k in best:
+                kwargs[k] = best[k]
+        kwargs["ticker_to_vol_group_idx"] = None
 
     return kwargs
 
 
-# =============================================================
-# 내부 helper: 기존 보고서 + extended 보고서 동시 생성
-# =============================================================
 def _build_validation_reports(
     y_true_all: np.ndarray,
     y_pred_all: np.ndarray,
@@ -87,13 +166,6 @@ def _build_validation_reports(
     val_cfg: dict,
     title: str = "",
 ) -> dict:
-    """
-    동일 (y_true, y_pred, groups) 에 대해:
-      - basic_report : 기존 Kupiec UC test (호환성 유지)
-      - extended_report : UC + CC + DQ test (Buczyński & Chlebus 2024 framework)
-
-    extended_report 가 basic_report 의 superset이므로, 분석/저장 용도에 따라 선택 사용.
-    """
     basic_report = run_validation_by_group(
         y_true_all,
         y_pred_all,
@@ -113,7 +185,6 @@ def _build_validation_reports(
         dq_n_lags=val_cfg.get("dq_n_lags", 4),
     )
 
-    # 콘솔 요약 출력 (Phase 1 효과 즉시 가시화)
     if title:
         print_extended_summary(extended_report, title=title)
 
@@ -125,32 +196,38 @@ def rolling_window_backtest(
     config: dict,
     n_splits: int = 5,
     return_extended: bool = False,
+    mode: str = None,
 ) -> pd.DataFrame:
     """
-    Rolling-window 백테스트. 기본 반환은 기존과 동일 (basic Kupiec report).
+    Rolling-window 백테스트.
 
     Args:
-        return_extended: True 면 {"basic", "extended"} dict 반환,
-                         False 면 기존 호환성 유지 (basic DataFrame 만).
-                         두 경우 모두 콘솔에 extended summary 출력.
+        mode: 'm4_garch' / 'm4_combined' / None
+              모드별 checkpoint + best_params + vol_group_map 자동 로드
     """
     data_cfg = config["data"]
     model_cfg = config["model"]
 
-    ckpts = glob.glob(str(CHECKPOINT_DIR / "*.ckpt"))
-    if not ckpts:
-        raise FileNotFoundError("model/saved/ 에 체크포인트가 없습니다.")
-    ckpt_path = sorted(ckpts)[-1]
+    print(f"\n[backtest] mode={mode}")
+    ckpt_path = _find_checkpoint(mode)
+    print(f"[backtest] checkpoint: {ckpt_path}")
+
+    vol_group_map = _load_vol_group_map() if mode == "m4_combined" else None
+    if mode == "m4_combined":
+        if vol_group_map is None:
+            raise ValueError(f"mode='m4_combined' 인데 {VOL_GROUP_MAP_PATH} 없음")
+        print(f"[backtest] vol_group_map 로드: {len(vol_group_map)} tickers")
 
     vix_mean, vix_std = get_vix_stats(df)
-
     train_ds, _ = build_dataset(
         df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
 
-    model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
+    model_kwargs = _build_model_kwargs(
+        model_cfg, vix_mean, vix_std, mode=mode, df=df, vol_group_map=vol_group_map
+    )
     model = M4FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
@@ -208,7 +285,7 @@ def rolling_window_backtest(
     reports = _build_validation_reports(
         y_true_all, y_pred_all, groups_all,
         model_cfg, val_cfg,
-        title=f"Rolling-window Backtest ({n_splits} splits)",
+        title=f"Rolling-window Backtest (mode={mode}, {n_splits} splits)",
     )
 
     return reports if return_extended else reports["basic"]
@@ -220,27 +297,28 @@ def period_backtest(
     start: str,
     end: str,
     return_extended: bool = False,
+    mode: str = None,
 ) -> pd.DataFrame:
-    """
-    구간 (start ~ end) 백테스트. 기존 호환성 유지 + extended 옵션.
-    """
     data_cfg = config["data"]
     model_cfg = config["model"]
 
-    ckpts = glob.glob(str(CHECKPOINT_DIR / "*.ckpt"))
-    if not ckpts:
-        raise FileNotFoundError("model/saved/ 에 체크포인트가 없습니다.")
-    ckpt_path = sorted(ckpts)[-1]
+    print(f"\n[backtest] mode={mode}, period={start}~{end}")
+    ckpt_path = _find_checkpoint(mode)
+
+    vol_group_map = _load_vol_group_map() if mode == "m4_combined" else None
+    if mode == "m4_combined" and vol_group_map is None:
+        raise ValueError(f"mode='m4_combined' 인데 {VOL_GROUP_MAP_PATH} 없음")
 
     vix_mean, vix_std = get_vix_stats(df)
-
     train_ds, _ = build_dataset(
         df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
 
-    model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
+    model_kwargs = _build_model_kwargs(
+        model_cfg, vix_mean, vix_std, mode=mode, df=df, vol_group_map=vol_group_map
+    )
     model = M4FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
@@ -300,7 +378,7 @@ def period_backtest(
     reports = _build_validation_reports(
         y_true_all, y_pred_all, groups_all,
         model_cfg, val_cfg,
-        title=f"Period Backtest ({start} ~ {end})",
+        title=f"Period Backtest (mode={mode}, {start} ~ {end})",
     )
 
     reports["basic"]["period"] = f"{start} ~ {end}"
@@ -309,31 +387,13 @@ def period_backtest(
     return reports if return_extended else reports["basic"]
 
 
-def covid_backtest(
-    df: pd.DataFrame,
-    config: dict,
-    start: str = COVID_START,
-    end: str = COVID_END,
-    return_extended: bool = False,
-) -> pd.DataFrame:
-    return period_backtest(df, config, start, end, return_extended=return_extended)
+def covid_backtest(df, config, start=COVID_START, end=COVID_END, return_extended=False, mode=None):
+    return period_backtest(df, config, start, end, return_extended=return_extended, mode=mode)
 
 
-def ukraine_inflation_backtest(
-    df: pd.DataFrame,
-    config: dict,
-    start: str = UKRAINE_INFLATION_START,
-    end: str = UKRAINE_INFLATION_END,
-    return_extended: bool = False,
-) -> pd.DataFrame:
-    return period_backtest(df, config, start, end, return_extended=return_extended)
+def ukraine_inflation_backtest(df, config, start=UKRAINE_INFLATION_START, end=UKRAINE_INFLATION_END, return_extended=False, mode=None):
+    return period_backtest(df, config, start, end, return_extended=return_extended, mode=mode)
 
 
-def trump_tariff_backtest(
-    df: pd.DataFrame,
-    config: dict,
-    start: str = TRUMP_TARIFF_START,
-    end: str = TRUMP_TARIFF_END,
-    return_extended: bool = False,
-) -> pd.DataFrame:
-    return period_backtest(df, config, start, end, return_extended=return_extended)
+def trump_tariff_backtest(df, config, start=TRUMP_TARIFF_START, end=TRUMP_TARIFF_END, return_extended=False, mode=None):
+    return period_backtest(df, config, start, end, return_extended=return_extended, mode=mode)

@@ -6,13 +6,13 @@ GPU 서버용 전체 파이프라인 (M4 확장)
   4~6단계: COVID / 우크라이나 / 트럼프 관세 구간 백테스트
 
 실행:
-  python run_full_pipeline.py --mode m4_garch                  # M4-GARCH only
-  python run_full_pipeline.py --mode m4_combined --n_trials 60 # M4-Combined (권장 trial ↑)
-  python run_full_pipeline.py --mode m4_garch --skip_optuna    # Optuna 생략
+  python run_full_pipeline_m4.py --mode m4_garch                  # M4-GARCH only
+  python run_full_pipeline_m4.py --mode m4_combined --n_trials 60 # M4-Combined (권장 trial ↑)
+  python run_full_pipeline_m4.py --mode m4_garch --skip_optuna    # Optuna 생략
 
 ablation 비교:
-  python run_full_pipeline.py --mode m4_garch
-  python run_full_pipeline.py --mode m4_combined --n_trials 60
+  python run_full_pipeline_m4.py --mode m4_garch
+  python run_full_pipeline_m4.py --mode m4_combined --n_trials 60
   → 두 모드 결과 모두 model/saved/ 에 저장됨 (파일명에 mode 접두)
 """
 
@@ -54,7 +54,7 @@ CHECKPOINT_DIR = Path("model/saved")
 LOG_DIR = Path("logs")
 
 # ===== M4: vol_group 매핑 파일 위치 =====
-VOL_GROUP_MAP_PATH = Path("vol_group_map.json")
+VOL_GROUP_MAP_PATH = Path("data/raw/vol_group_map.json")
 # 또는 data/raw/vol_group_map.json — 사용자 환경에 따라 조정
 
 # ===== M4: vol_group 라벨 (loss.py group_labels 와 일치) =====
@@ -88,6 +88,37 @@ def _get_paths(mode: str) -> dict:
     }
 
 
+def _build_ticker_to_vol_group_idx(
+    panel_df, vol_group_map: dict, group_labels: list
+):
+    """
+    Panel df 의 sorted unique ticker 순서 기준으로 vol_group_idx tensor 생성.
+
+    pytorch_forecasting 의 NaNLabelEncoder 가 alphabetic order 로 categorical idx
+    부여한다는 점을 활용 (즉 ticker 0 = sorted 첫 ticker, ticker 1 = 두번째, ...).
+
+    Returns:
+        torch.LongTensor (n_tickers,) — ticker categorical idx 별 vol_group idx
+    """
+    import torch
+    if vol_group_map is None:
+        return None
+
+    panel_tickers_sorted = sorted(panel_df["group_id"].unique())
+    label_to_idx = {l: i for i, l in enumerate(group_labels)}
+    default_label = group_labels[len(group_labels) // 2]  # mid_vol
+
+    vg_list = []
+    for ticker in panel_tickers_sorted:
+        vg_str = vol_group_map.get(ticker, default_label)
+        if vg_str not in label_to_idx:
+            print(f"  ⚠️ {ticker}: '{vg_str}' 없는 라벨 → {default_label} fallback")
+            vg_str = default_label
+        vg_list.append(label_to_idx[vg_str])
+
+    return torch.tensor(vg_list, dtype=torch.long)
+
+
 def _build_from_dataset_kwargs(
     params: dict,
     config: dict,
@@ -96,11 +127,12 @@ def _build_from_dataset_kwargs(
     vix_std: float,
     mode: str,
     vol_group_map: dict = None,
+    panel_df=None,
 ) -> dict:
     """
     mode 에 따라 M4FullModel.from_dataset 의 인자 dict 구성.
       m4_garch    : use_garch_sigma=True + scalar α/β
-      m4_combined : use_garch_sigma=True + group 별 α/β + vol_group_map
+      m4_combined : use_garch_sigma=True + group 별 α/β + ticker_to_vol_group_idx
     """
     model_cfg = config["model"]
 
@@ -128,7 +160,7 @@ def _build_from_dataset_kwargs(
             beta_down=params.get("beta_down", 1.0),
             alpha_up=params.get("alpha_up", 1.0),
             beta_up=params.get("beta_up", 1.0),
-            vol_group_map=None,           # M4-GARCH only mode
+            ticker_to_vol_group_idx=None,     # M4-GARCH only mode
         )
     elif mode == "m4_combined":
         # Group 별 α/β dict 구성
@@ -150,13 +182,22 @@ def _build_from_dataset_kwargs(
                 "m4_combined 모드에 vol_group_map 이 필요. "
                 f"{VOL_GROUP_MAP_PATH} 가 없거나 비어있음."
             )
+        if panel_df is None:
+            raise ValueError(
+                "m4_combined 모드에 panel_df 가 필요 (ticker 순서 결정용)."
+            )
+
+        # ticker idx → vol_group idx tensor 생성
+        ticker_to_vol_group_idx = _build_ticker_to_vol_group_idx(
+            panel_df, vol_group_map, GROUP_LABELS
+        )
 
         common.update(
             alpha_down_by_group=alpha_down_by_group,
             beta_down_by_group=beta_down_by_group,
             alpha_up_by_group=alpha_up_by_group,
             beta_up_by_group=beta_up_by_group,
-            vol_group_map=vol_group_map,
+            ticker_to_vol_group_idx=ticker_to_vol_group_idx,
         )
     else:
         raise ValueError(f"Unknown mode: {mode}")
@@ -221,7 +262,8 @@ def run_optuna(
                 )
 
         from_dataset_kwargs = _build_from_dataset_kwargs(
-            params, config, train_ds, vix_mean, vix_std, mode, vol_group_map
+            params, config, train_ds, vix_mean, vix_std, mode, vol_group_map,
+            panel_df=df,
         )
         model = M4FullModel.from_dataset(**from_dataset_kwargs)
 
@@ -287,7 +329,8 @@ def train_with_params(
     )
 
     from_dataset_kwargs = _build_from_dataset_kwargs(
-        params, config, train_ds, vix_mean, vix_std, mode, vol_group_map
+        params, config, train_ds, vix_mean, vix_std, mode, vol_group_map,
+        panel_df=df,
     )
     model = M4FullModel.from_dataset(**from_dataset_kwargs)
 

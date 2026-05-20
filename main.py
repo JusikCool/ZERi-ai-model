@@ -1,10 +1,10 @@
 import argparse
 from pathlib import Path
 
-from model.m3_full_model.dataset import load_data
+from model.m4.dataset import load_data
 from model.m3_full_model.train import load_config, run_optuna, train
 from validation.kupiec.kupiec import run_validation
-from validation.backtest.backtest import rolling_window_backtest
+from validation.backtest.backtest_m4 import rolling_window_backtest
 
 
 def parse_args() -> argparse.Namespace:
@@ -14,6 +14,13 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=["train", "optuna", "backtest"],
         default="train",
+    )
+    # ===== M4 추가: backtest 시 어느 모델 모드를 평가할지 =====
+    parser.add_argument(
+        "--backtest_mode",
+        choices=["m4_garch", "m4_combined"],
+        default="m4_combined",
+        help="backtest 모드 — 학습한 모델과 동일해야 함",
     )
     parser.add_argument("--n_trials", type=int, default=30)
     parser.add_argument("--n_splits", type=int, default=5)
@@ -34,7 +41,12 @@ def main():
 
     elif args.mode == "backtest":
         df = load_data()
-        report = rolling_window_backtest(df, config, n_splits=args.n_splits)
+        report = rolling_window_backtest(
+            df, config, n_splits=args.n_splits, mode=args.backtest_mode
+        )
+        out_path = Path(f"model/saved/backtest_results_{args.backtest_mode}.csv")
+        report.to_csv(out_path, index=False)
+        print(f"\n결과 저장: {out_path}")
         print(report.to_string(index=False))
 
 

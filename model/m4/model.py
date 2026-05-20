@@ -70,7 +70,7 @@ class M4FullModel(pl.LightningModule):
         crossing_weight: float = 0.1,
         # ===== M4 추가 인자 =====
         use_garch_sigma: bool = True,
-        vol_group_map: dict = None,
+        ticker_to_vol_group_idx: torch.Tensor = None,
         group_labels: list[str] = None,
         alpha_down_by_group: dict = None,
         beta_down_by_group: dict = None,
@@ -104,40 +104,21 @@ class M4FullModel(pl.LightningModule):
             reduce_on_plateau_patience=4,
         )
 
-        # ===== M4: ticker idx → vol_group idx 매핑 =====
-        ticker_to_vol_group_idx = None
-        if vol_group_map is not None:
-            try:
-                label_to_idx = {l: i for i, l in enumerate(group_labels)}
-                default_label = group_labels[len(group_labels) // 2]  # mid_vol
-
-                # dataset 의 categorical encoder 에서 ticker 순서 얻기
-                # pytorch_forecasting 의 표준 API: dataset.categorical_encoders[col].classes_
-                ticker_encoder = dataset.categorical_encoders["group_id"]
-                ticker_classes = list(ticker_encoder.classes_)
-
-                vg_list = []
-                for ticker in ticker_classes:
-                    vg_str = vol_group_map.get(ticker, default_label)
-                    if vg_str not in label_to_idx:
-                        print(
-                            f"  ⚠️ {ticker}: '{vg_str}' 없는 라벨 → {default_label} fallback"
-                        )
-                        vg_str = default_label
-                    vg_list.append(label_to_idx[vg_str])
-
-                ticker_to_vol_group_idx = torch.tensor(vg_list, dtype=torch.long)
-                print(
-                    f"[M4FullModel] vol_group lookup 등록: "
-                    f"{len(vg_list)} tickers, groups={group_labels}"
+        # ===== M4: ticker idx → vol_group idx 매핑 등록 =====
+        # 외부 (run_full_pipeline) 에서 이미 만든 tensor 를 받음 → categorical_encoders API 의존성 없음
+        if ticker_to_vol_group_idx is not None:
+            if not isinstance(ticker_to_vol_group_idx, torch.Tensor):
+                ticker_to_vol_group_idx = torch.tensor(
+                    ticker_to_vol_group_idx, dtype=torch.long
                 )
-            except (KeyError, AttributeError) as e:
-                print(
-                    f"[M4FullModel] vol_group 매핑 실패 (M4-GARCH only mode 로 fallback): {e}"
-                )
-                ticker_to_vol_group_idx = None
+            else:
+                ticker_to_vol_group_idx = ticker_to_vol_group_idx.long()
+            print(
+                f"[M4FullModel] ticker→vol_group 매핑 등록: "
+                f"{len(ticker_to_vol_group_idx)} tickers, groups={group_labels}"
+            )
         else:
-            print(f"[M4FullModel] vol_group_map=None → M4-GARCH only mode")
+            print(f"[M4FullModel] ticker_to_vol_group_idx=None → M4-GARCH only mode")
 
         adaptive_loss = AdaptivePinballLoss(
             quantiles=quantiles,
