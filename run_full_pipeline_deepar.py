@@ -32,12 +32,31 @@ from model.m3_full_model.dataset import (
     load_data,
 )
 from model.m3_full_model.deepar_model import M3FullModel
-from validation.backtest.deepar_backtest import rolling_window_backtest, covid_backtest
+from validation.backtest.deepar_backtest import (
+    covid_backtest,
+    rolling_window_backtest,
+    trump_tariff_backtest,
+    ukraine_inflation_backtest,
+)
 
 CONFIG_PATH = Path("configs/config.yaml")
 CHECKPOINT_DIR = Path("model/saved")
 LOG_DIR = Path("logs")
 BEST_PARAMS_PATH = Path("model/saved/best_params_deepar.json")
+
+
+def load_best_params() -> dict:
+    """저장된 Optuna 최적 파라미터 로드. 없으면 FileNotFoundError."""
+    if not BEST_PARAMS_PATH.exists():
+        raise FileNotFoundError(
+            f"{BEST_PARAMS_PATH} 가 존재하지 않습니다. "
+            "Optuna 를 먼저 실행해서 best_params_deepar.json 을 생성해야 "
+            "--from_train 모드를 사용할 수 있습니다."
+        )
+    with open(BEST_PARAMS_PATH, encoding="utf-8") as f:
+        params = json.load(f)
+    params.pop("val_loss", None)
+    return params
 
 
 def load_config() -> dict:
@@ -213,12 +232,27 @@ def run_backtest(config: dict) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_trials", type=int, default=30)
-    parser.add_argument("--skip_optuna", action="store_true")
+    parser.add_argument(
+        "--skip_optuna", action="store_true",
+        help="Optuna 생략하고 config.yaml 기본값으로 학습",
+    )
+    parser.add_argument(
+        "--from_train", action="store_true",
+        help="Optuna 생략하고 저장된 best_params_deepar.json 로 학습 단계부터 시작",
+    )
     args = parser.parse_args()
+
+    if args.skip_optuna and args.from_train:
+        raise SystemExit("--skip_optuna 와 --from_train 은 동시에 지정할 수 없습니다.")
 
     config = load_config()
 
-    if args.skip_optuna:
+    if args.from_train:
+        params = load_best_params()
+        print(f"[1단계 생략] {BEST_PARAMS_PATH} 로드 → 학습 단계부터 시작")
+        for k, v in params.items():
+            print(f"  {k}: {v}")
+    elif args.skip_optuna:
         model_cfg = config["model"]
         params = {
             "hidden_size": model_cfg["hidden_size"],
