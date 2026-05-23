@@ -60,6 +60,7 @@ class M3FullModel(pl.LightningModule):
         alpha_up: float = 1.0,
         beta_up: float = 1.0,
         crossing_weight: float = 0.1,
+        quantile_weights: list[float] = None,
     ) -> "M3FullModel":
         quantiles = quantiles or [0.1, 0.5, 0.9]
 
@@ -93,6 +94,7 @@ class M3FullModel(pl.LightningModule):
             alpha_up=alpha_up,
             beta_up=beta_up,
             crossing_weight=crossing_weight,
+            quantile_weights=quantile_weights,
         )
 
         return cls(

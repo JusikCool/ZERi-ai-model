@@ -14,6 +14,7 @@ class AdaptivePinballLoss(nn.Module):
         alpha_up: float = 1.0,
         beta_up: float = 1.0,
         crossing_weight: float = 0.1,
+        quantile_weights: list[float] = None,
     ):
         super().__init__()
         self.quantiles = quantiles or [0.05,0.10,0.15,0.20,0.25,0.30,
@@ -28,6 +29,18 @@ class AdaptivePinballLoss(nn.Module):
         self.alpha_up = alpha_up
         self.beta_up = beta_up
         self.crossing_weight = crossing_weight
+        if quantile_weights is None:
+            qw = [1.0] * len(self.quantiles)
+        else:
+            if len(quantile_weights) != len(self.quantiles):
+                raise ValueError(
+                    f"quantile_weights 길이({len(quantile_weights)}) != quantiles 길이({len(self.quantiles)})"
+                )
+            qw = list(quantile_weights)
+        self.register_buffer(
+            "quantile_weights",
+            torch.tensor(qw, dtype=torch.float32),
+        )
 
     def compute_lambda(
         self, vix: torch.Tensor, sigma: torch.Tensor, quantile: float
@@ -68,11 +81,12 @@ class AdaptivePinballLoss(nn.Module):
         sigma: torch.Tensor,
     ) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=y_pred.device)
+        weight_sum = self.quantile_weights.sum()
         for i, q in enumerate(self.quantiles):
             lambda_t = self.compute_lambda(vix, sigma, q)
             pb = self._pinball(y_pred[..., i], y_true, q)
-            total_loss = total_loss + (lambda_t * pb).mean()
+            total_loss = total_loss + self.quantile_weights[i] * (lambda_t * pb).mean()
 
-        total_loss = total_loss / len(self.quantiles)
+        total_loss = total_loss / weight_sum
         total_loss = total_loss + self.crossing_weight * self._crossing_penalty(y_pred)
         return total_loss
