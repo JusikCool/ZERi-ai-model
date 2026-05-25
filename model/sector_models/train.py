@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
-from model.m3_full_model.dataset import GROUP_ID, TIME_IDX
+from model.m3_full_model.dataset import GROUP_ID, TIME_IDX, get_vix_stats
 from model.m3_full_model.deepar_model import M3FullModel
 
 from .dataset import (
@@ -16,20 +16,8 @@ from .dataset import (
     build_sector_dataloaders,
     build_sector_dataset,
 )
-from .scales import get_scales_for_sector
 
-QUANTILES: list[float] = [
-    0.05, 0.10, 0.15, 0.20, 0.25, 0.30,
-    0.35, 0.40, 0.45, 0.50, 0.55,
-    0.60, 0.65, 0.70, 0.75, 0.80,
-    0.85, 0.90, 0.95,
-]
-
-TAIL_QUANTILES: set[float] = {0.05, 0.10, 0.90, 0.95}
-TAIL_WEIGHT: float = 3.0
-QUANTILE_WEIGHTS: list[float] = [
-    TAIL_WEIGHT if q in TAIL_QUANTILES else 1.0 for q in QUANTILES
-]
+QUANTILES: list[float] = [0.1, 0.5, 0.9]
 
 VIX_THRESHOLD: float = 25.0
 DEFAULT_MAX_EPOCHS: int = 50
@@ -54,7 +42,9 @@ def best_ckpt_path(sector_id: str) -> Path:
     return sector_dir(sector_id) / "best.ckpt"
 
 
-def _build_model(train_ds, params: dict, scales: dict) -> M3FullModel:
+def _build_model(
+    train_ds, params: dict, vix_mean: float, vix_std: float
+) -> M3FullModel:
     return M3FullModel.from_dataset(
         dataset=train_ds,
         learning_rate=float(params["learning_rate"]),
@@ -64,15 +54,13 @@ def _build_model(train_ds, params: dict, scales: dict) -> M3FullModel:
         dropout=float(params["dropout"]),
         quantiles=QUANTILES,
         vix_threshold=VIX_THRESHOLD,
-        vix_mean=float(scales["vix_mean"]),
-        vix_std=float(scales["vix_std"]),
-        sigma_scale=float(scales["sigma_std"]),
+        vix_mean=vix_mean,
+        vix_std=vix_std,
         alpha_down=float(params.get("alpha_down", 1.0)),
         beta_down=float(params.get("beta_down", 1.0)),
         alpha_up=float(params.get("alpha_up", 1.0)),
         beta_up=float(params.get("beta_up", 1.0)),
-        crossing_weight=float(params.get("crossing_weight", 0.02)),
-        quantile_weights=QUANTILE_WEIGHTS,
+        crossing_weight=float(params.get("crossing_weight", 0.1)),
     )
 
 
@@ -89,13 +77,13 @@ def run_optuna(
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> dict:
     pl.seed_everything(SEED, workers=True)
-    scales = get_scales_for_sector(sector_id)
-    _, train_ds, val_ds = build_sector_dataset(
+    df, train_ds, val_ds = build_sector_dataset(
         sector_id,
         max_encoder_length=DEFAULT_ENCODER_LEN,
         max_prediction_length=DEFAULT_PREDICTION_LEN,
         val_ratio=DEFAULT_VAL_RATIO,
     )
+    vix_mean, vix_std = get_vix_stats(df)
     train_loader, val_loader = build_sector_dataloaders(
         train_ds, val_ds, batch_size=batch_size
     )
@@ -104,7 +92,7 @@ def run_optuna(
 
     def objective(trial: optuna.Trial) -> float:
         params = {
-            "hidden_size": trial.suggest_categorical("hidden_size", [32, 64, 128]),
+            "hidden_size": trial.suggest_categorical("hidden_size", [16, 32, 64, 128]),
             "rnn_layers": trial.suggest_int("rnn_layers", 1, 3),
             "cell_type": trial.suggest_categorical("cell_type", ["LSTM", "GRU"]),
             "dropout": trial.suggest_float("dropout", 0.05, 0.3),
@@ -113,9 +101,9 @@ def run_optuna(
             "beta_down": trial.suggest_float("beta_down", 0.5, 3.0),
             "alpha_up": trial.suggest_float("alpha_up", 0.5, 3.0),
             "beta_up": trial.suggest_float("beta_up", 0.5, 3.0),
-            "crossing_weight": trial.suggest_float("crossing_weight", 0.001, 0.05, log=True),
+            "crossing_weight": trial.suggest_float("crossing_weight", 0.01, 0.5),
         }
-        model = _build_model(train_ds, params, scales)
+        model = _build_model(train_ds, params, vix_mean, vix_std)
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,
@@ -162,18 +150,18 @@ def train_with_params(
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Path:
     pl.seed_everything(SEED, workers=True)
-    scales = get_scales_for_sector(sector_id)
-    _, train_ds, val_ds = build_sector_dataset(
+    df, train_ds, val_ds = build_sector_dataset(
         sector_id,
         max_encoder_length=DEFAULT_ENCODER_LEN,
         max_prediction_length=DEFAULT_PREDICTION_LEN,
         val_ratio=DEFAULT_VAL_RATIO,
     )
+    vix_mean, vix_std = get_vix_stats(df)
     train_loader, val_loader = build_sector_dataloaders(
         train_ds, val_ds, batch_size=batch_size
     )
 
-    model = _build_model(train_ds, params, scales)
+    model = _build_model(train_ds, params, vix_mean, vix_std)
 
     accelerator, devices = _accelerator()
 
@@ -225,14 +213,14 @@ def load_best_params(sector_id: str) -> dict:
 
 def load_trained_model(sector_id: str) -> tuple[M3FullModel, "pd.DataFrame", object, object]:
     params = load_best_params(sector_id)
-    scales = get_scales_for_sector(sector_id)
     df, train_ds, val_ds = build_sector_dataset(
         sector_id,
         max_encoder_length=DEFAULT_ENCODER_LEN,
         max_prediction_length=DEFAULT_PREDICTION_LEN,
         val_ratio=DEFAULT_VAL_RATIO,
     )
-    model = _build_model(train_ds, params, scales)
+    vix_mean, vix_std = get_vix_stats(df)
+    model = _build_model(train_ds, params, vix_mean, vix_std)
 
     ckpt_path = best_ckpt_path(sector_id)
     if not ckpt_path.exists():

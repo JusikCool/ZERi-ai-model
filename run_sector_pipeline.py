@@ -3,12 +3,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from model.sector_models.scales import (
-    GLOBAL_SCALES_PATH,
-    SECTOR_SCALES_PATH,
-    compute_and_save_global_scales,
-    compute_and_save_sector_scales,
-)
 from model.sector_models.sectors import SECTOR_IDS
 from model.sector_models.train import (
     DEFAULT_BATCH_SIZE,
@@ -35,10 +29,6 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max_epochs", type=int, default=DEFAULT_MAX_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument(
-        "--skip_scales", action="store_true",
-        help="global_scales.json 재계산 생략 (이미 있으면 그대로 사용)",
-    )
     parser.add_argument(
         "--no_eval", action="store_true",
         help="섹터별 학습 후 Kupiec 검증 생략",
@@ -100,7 +90,7 @@ def _summarize(reports_per_ticker: list[pd.DataFrame]) -> None:
     combined = pd.concat(reports_per_ticker, ignore_index=True)
     combined.to_csv(RESULTS_DIR / "sector_validation_all.csv", index=False)
 
-    _print_header("[전체 종합] Q0.10 Violation Rate (목표 0.08~0.12)")
+    _print_header("[전체 종합] Q0.10 Violation Rate (목표 0.05~0.15)")
     q10 = combined[combined["quantile"] == 0.10].copy()
     cols = ["sector", "group_id", "violation_rate", "p_value", "vr_pass", "kupiec_pass"]
     print(q10[cols].to_string(index=False))
@@ -125,24 +115,6 @@ def _summarize(reports_per_ticker: list[pd.DataFrame]) -> None:
 
 def main() -> None:
     args = _parse_args()
-
-    _print_header("[Pre] 전역 VIX 스케일 & 섹터별 σ 스케일")
-    if args.skip_scales and GLOBAL_SCALES_PATH.exists() and SECTOR_SCALES_PATH.exists():
-        from model.sector_models.scales import (
-            load_global_scales,
-            load_sector_scales,
-        )
-
-        scales = load_global_scales(auto_compute=False)
-        sector_scales = load_sector_scales(auto_compute=False)
-        print(f"기존 {GLOBAL_SCALES_PATH}, {SECTOR_SCALES_PATH} 사용")
-    else:
-        scales = compute_and_save_global_scales()
-        sector_scales = compute_and_save_sector_scales(list(SECTOR_IDS))
-        print(f"새로 계산 → {GLOBAL_SCALES_PATH}, {SECTOR_SCALES_PATH}")
-    print(f"[전역] vix_mean={scales['vix_mean']:.4f}, vix_std={scales['vix_std']:.4f}")
-    for sec, vals in sector_scales.items():
-        print(f"  [{sec}] sigma_std={vals['sigma_std']:.4f}")
 
     targets = args.sectors or list(SECTOR_IDS)
     unknown = [s for s in targets if s not in SECTOR_IDS]
