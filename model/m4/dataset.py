@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import torch
 from pytorch_forecasting import TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 # ===== M4 변경: v3 panel (GARCH_Variance + vol_group 포함) =====
 DATA_PATH = Path("data/raw/tft_processed_panel_v3.csv")
@@ -185,6 +187,135 @@ def build_dataloaders(
 ) -> tuple[DataLoader, DataLoader]:
     train_loader = train_dataset.to_dataloader(
         train=True, batch_size=batch_size, num_workers=num_workers
+    )
+    val_loader = val_dataset.to_dataloader(
+        train=False, batch_size=batch_size * 2, num_workers=num_workers
+    )
+    return train_loader, val_loader
+
+
+def _extract_sample_keys(
+    train_ds: TimeSeriesDataSet,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    train_ds 의 각 sample 에 대해 (group_id, decoder_start_time_idx) 추출.
+    pytorch-forecasting 버전에 따라 index/decoded_index 구조가 다르므로
+    여러 fallback 경로 사용.
+    """
+    decoded = getattr(train_ds, "decoded_index", None)
+    if decoded is not None and isinstance(decoded, pd.DataFrame):
+        gcol = GROUP_ID if GROUP_ID in decoded.columns else None
+        tcol = "time" if "time" in decoded.columns else (
+            TIME_IDX if TIME_IDX in decoded.columns else None
+        )
+        if gcol and tcol:
+            return (
+                decoded[gcol].astype(str).to_numpy(),
+                decoded[tcol].astype(int).to_numpy(),
+            )
+
+    index = train_ds.index
+    if isinstance(index, pd.DataFrame):
+        gcol = GROUP_ID if GROUP_ID in index.columns else None
+        tcol = "time" if "time" in index.columns else (
+            TIME_IDX if TIME_IDX in index.columns else None
+        )
+        if gcol and tcol:
+            return (
+                index[gcol].astype(str).to_numpy(),
+                index[tcol].astype(int).to_numpy(),
+            )
+
+    raise RuntimeError(
+        "train_ds 에서 (group_id, time_idx) 키를 추출할 수 없음. "
+        "pytorch-forecasting 버전을 확인하세요."
+    )
+
+
+def compute_crisis_weights(
+    train_ds: TimeSeriesDataSet,
+    df: pd.DataFrame,
+    encoder_length: int,
+    vix_col: str = "VIX_Close",
+    vix_threshold: float = 25.0,
+    high_vix_multiplier: float = 3.0,
+) -> np.ndarray:
+    """
+    각 학습 sample 의 encoder window 내 'VIX > threshold 비율' 기반 가중치 계산.
+
+    weight_i = 1 + (high_vix_multiplier - 1) * (high_vix_ratio in window_i)
+
+    공포 구간(VIX>25) 비율이 50%인 윈도우는 weight = 1 + 2*0.5 = 2.0 (high_vix_multiplier=3 일 때)
+    평시 윈도우 (VIX>25 가 0%)는 weight = 1.0
+    """
+    df_sorted = df.sort_values([GROUP_ID, TIME_IDX]).reset_index(drop=True)
+
+    def _rolling_high_vix_ratio(s: pd.Series) -> pd.Series:
+        is_high = (s > vix_threshold).astype(float)
+        return is_high.rolling(window=encoder_length, min_periods=1).mean()
+
+    df_sorted["_hv_ratio"] = (
+        df_sorted.groupby(GROUP_ID)[vix_col]
+        .transform(_rolling_high_vix_ratio)
+    )
+
+    ratio_lookup = (
+        df_sorted.set_index([GROUP_ID, TIME_IDX])["_hv_ratio"].to_dict()
+    )
+
+    groups, time_starts = _extract_sample_keys(train_ds)
+
+    weights = np.ones(len(groups), dtype=np.float32)
+    miss = 0
+    for i, (g, t) in enumerate(zip(groups, time_starts)):
+        key = (str(g), int(t) - 1)
+        ratio = ratio_lookup.get(key, None)
+        if ratio is None:
+            miss += 1
+            ratio = 0.0
+        weights[i] = 1.0 + (high_vix_multiplier - 1.0) * float(ratio)
+
+    high_w = float((weights > 1.5).mean())
+    print(
+        f"[crisis-aware sampler] n_samples={len(weights)}, "
+        f"mean_w={weights.mean():.3f}, "
+        f"max_w={weights.max():.3f}, "
+        f"high_vix_window_fraction(w>1.5)={high_w:.3f}, "
+        f"missing_keys={miss}"
+    )
+    return weights
+
+
+def build_crisis_aware_dataloaders(
+    train_dataset: TimeSeriesDataSet,
+    val_dataset: TimeSeriesDataSet,
+    df: pd.DataFrame,
+    encoder_length: int,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    vix_threshold: float = 25.0,
+    high_vix_multiplier: float = 3.0,
+) -> tuple[DataLoader, DataLoader]:
+    """
+    train_loader 는 WeightedRandomSampler 로 공포 구간 윈도우를 oversampling.
+    val_loader 는 그대로 (편향 없는 검증).
+    """
+    weights = compute_crisis_weights(
+        train_dataset, df,
+        encoder_length=encoder_length,
+        vix_threshold=vix_threshold,
+        high_vix_multiplier=high_vix_multiplier,
+    )
+    sampler = WeightedRandomSampler(
+        weights=torch.as_tensor(weights, dtype=torch.double),
+        num_samples=len(weights),
+        replacement=True,
+    )
+    train_loader = train_dataset.to_dataloader(
+        train=False,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sampler=sampler,
     )
     val_loader = val_dataset.to_dataloader(
         train=False, batch_size=batch_size * 2, num_workers=num_workers

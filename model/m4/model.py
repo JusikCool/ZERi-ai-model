@@ -76,6 +76,7 @@ class M4FullModel(pl.LightningModule):
         beta_down_by_group: dict = None,
         alpha_up_by_group: dict = None,
         beta_up_by_group: dict = None,
+        quantile_weights: list[float] = None,
     ) -> "M4FullModel":
         quantiles = quantiles or [0.1, 0.5, 0.9]
         group_labels = group_labels or ["low_vol", "mid_vol", "high_vol"]
@@ -135,6 +136,7 @@ class M4FullModel(pl.LightningModule):
             beta_down_by_group=beta_down_by_group,
             alpha_up_by_group=alpha_up_by_group,
             beta_up_by_group=beta_up_by_group,
+            quantile_weights=quantile_weights,
         )
 
         return cls(
