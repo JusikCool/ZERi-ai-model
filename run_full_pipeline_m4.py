@@ -36,9 +36,8 @@ def _patched_get_attention_mask(self, encoder_lengths, **kwargs):
 TemporalFusionTransformer.get_attention_mask = _patched_get_attention_mask
 
 from model.m4.dataset import (
-    build_crisis_aware_dataloaders,
-    build_dataloaders,
     build_dataset,
+    build_dataloaders,
     get_vix_stats,
     load_data,
 )
@@ -60,16 +59,6 @@ VOL_GROUP_MAP_PATH = Path("data/raw/vol_group_map.json")
 
 # ===== M4: vol_group 라벨 (loss.py group_labels 와 일치) =====
 GROUP_LABELS = ["low_vol", "mid_vol", "high_vol"]
-
-# ===== Crisis robustness 설정 =====
-TAIL_QUANTILES: set[float] = {0.05, 0.10, 0.90, 0.95}
-TAIL_WEIGHT: float = 3.0
-CRISIS_VIX_THRESHOLD: float = 25.0
-CRISIS_HIGH_VIX_MULTIPLIER: float = 3.0
-
-
-def _build_quantile_weights(quantiles: list[float]) -> list[float]:
-    return [TAIL_WEIGHT if q in TAIL_QUANTILES else 1.0 for q in quantiles]
 
 
 def load_config() -> dict:
@@ -162,7 +151,6 @@ def _build_from_dataset_kwargs(
         crossing_weight=params.get("crossing_weight", 0.1),
         use_garch_sigma=True,            # 두 모드 모두 GARCH
         group_labels=GROUP_LABELS,
-        quantile_weights=_build_quantile_weights(model_cfg["quantiles"]),
     )
 
     if mode == "m4_garch":
@@ -218,8 +206,7 @@ def _build_from_dataset_kwargs(
 
 
 def run_optuna(
-    config: dict, n_trials: int, mode: str, vol_group_map: dict = None,
-    crisis_sampling: bool = True,
+    config: dict, n_trials: int, mode: str, vol_group_map: dict = None
 ) -> dict:
     data_cfg = config["data"]
     model_cfg = config["model"]
@@ -232,19 +219,9 @@ def run_optuna(
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
-    if crisis_sampling:
-        print(f"\n[crisis-aware sampler] VIX>{CRISIS_VIX_THRESHOLD} 윈도우 oversampling (×{CRISIS_HIGH_VIX_MULTIPLIER})")
-        train_loader, val_loader = build_crisis_aware_dataloaders(
-            train_ds, val_ds, df,
-            encoder_length=data_cfg["window_size"],
-            batch_size=model_cfg["batch_size"],
-            vix_threshold=CRISIS_VIX_THRESHOLD,
-            high_vix_multiplier=CRISIS_HIGH_VIX_MULTIPLIER,
-        )
-    else:
-        train_loader, val_loader = build_dataloaders(
-            train_ds, val_ds, batch_size=model_cfg["batch_size"]
-        )
+    train_loader, val_loader = build_dataloaders(
+        train_ds, val_ds, batch_size=model_cfg["batch_size"]
+    )
 
     def objective(trial: optuna.Trial) -> float:
         # 공통 hyperparameter
@@ -334,8 +311,7 @@ def run_optuna(
 
 
 def train_with_params(
-    config: dict, params: dict, mode: str, vol_group_map: dict = None,
-    crisis_sampling: bool = True,
+    config: dict, params: dict, mode: str, vol_group_map: dict = None
 ) -> Path:
     data_cfg = config["data"]
     model_cfg = config["model"]
@@ -348,19 +324,9 @@ def train_with_params(
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
-    if crisis_sampling:
-        print(f"\n[crisis-aware sampler] VIX>{CRISIS_VIX_THRESHOLD} 윈도우 oversampling (×{CRISIS_HIGH_VIX_MULTIPLIER})")
-        train_loader, val_loader = build_crisis_aware_dataloaders(
-            train_ds, val_ds, df,
-            encoder_length=data_cfg["window_size"],
-            batch_size=model_cfg["batch_size"],
-            vix_threshold=CRISIS_VIX_THRESHOLD,
-            high_vix_multiplier=CRISIS_HIGH_VIX_MULTIPLIER,
-        )
-    else:
-        train_loader, val_loader = build_dataloaders(
-            train_ds, val_ds, batch_size=model_cfg["batch_size"]
-        )
+    train_loader, val_loader = build_dataloaders(
+        train_ds, val_ds, batch_size=model_cfg["batch_size"]
+    )
 
     from_dataset_kwargs = _build_from_dataset_kwargs(
         params, config, train_ds, vix_mean, vix_std, mode, vol_group_map,
@@ -461,12 +427,7 @@ def main():
     )
     parser.add_argument("--n_trials", type=int, default=30)
     parser.add_argument("--skip_optuna", action="store_true")
-    parser.add_argument(
-        "--no_crisis_sampling", action="store_true",
-        help="VIX>25 윈도우 oversampling 끔 (기본: on)",
-    )
     args = parser.parse_args()
-    crisis_sampling = not args.no_crisis_sampling
 
     mode = args.mode
     print(f"\n{'='*60}")
@@ -519,16 +480,10 @@ def main():
         print(f"[Optuna 생략] config.yaml + 기본값 (α/β=1.0) 으로 학습.")
     else:
         print(f"[1단계] Optuna 탐색 시작 ({args.n_trials} trials, mode={mode})")
-        params = run_optuna(
-            config, args.n_trials, mode, vol_group_map,
-            crisis_sampling=crisis_sampling,
-        )
+        params = run_optuna(config, args.n_trials, mode, vol_group_map)
 
     print(f"\n[2단계] 최적 파라미터로 재학습 (mode={mode})")
-    train_with_params(
-        config, params, mode, vol_group_map,
-        crisis_sampling=crisis_sampling,
-    )
+    train_with_params(config, params, mode, vol_group_map)
 
     print(f"\n[3~6단계] 백테스트 실행 (mode={mode})")
     run_backtest(config, mode)

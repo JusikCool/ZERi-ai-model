@@ -196,11 +196,19 @@ def build_dataloaders(
 
 def _extract_sample_keys(
     train_ds: TimeSeriesDataSet,
+    probe_batch_size: int = 1024,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    train_ds 의 각 sample 에 대해 (group_id, decoder_start_time_idx) 추출.
-    pytorch-forecasting 버전에 따라 index/decoded_index 구조가 다르므로
-    여러 fallback 경로 사용.
+    train_ds 의 각 sample 에 대해 (group_id, prediction_start_time_idx) 추출.
+
+    pytorch-forecasting 버전마다 train_ds.index 구조가 다르고 (특히 group_id 가
+    별도 categorical encoder 에 들어있는 경우), 공식 public API 인
+    train_ds.x_to_index(batch_x) 를 sequential dataloader 로 한 번 훑어서
+    안정적으로 수집한다.
+
+    Fallback:
+      1) train_ds.decoded_index 가 group_id + time 컬럼을 가지고 있으면 그것 사용 (빠름)
+      2) 위가 안 되면 x_to_index 경로 (모든 pytorch-forecasting 0.10+ 호환)
     """
     decoded = getattr(train_ds, "decoded_index", None)
     if decoded is not None and isinstance(decoded, pd.DataFrame):
@@ -214,21 +222,36 @@ def _extract_sample_keys(
                 decoded[tcol].astype(int).to_numpy(),
             )
 
-    index = train_ds.index
-    if isinstance(index, pd.DataFrame):
-        gcol = GROUP_ID if GROUP_ID in index.columns else None
-        tcol = "time" if "time" in index.columns else (
-            TIME_IDX if TIME_IDX in index.columns else None
+    if not hasattr(train_ds, "x_to_index"):
+        raise RuntimeError(
+            "train_ds.x_to_index() 가 없습니다. pytorch-forecasting 0.10+ 권장."
         )
-        if gcol and tcol:
-            return (
-                index[gcol].astype(str).to_numpy(),
-                index[tcol].astype(int).to_numpy(),
-            )
 
-    raise RuntimeError(
-        "train_ds 에서 (group_id, time_idx) 키를 추출할 수 없음. "
-        "pytorch-forecasting 버전을 확인하세요."
+    print(f"[sampler] x_to_index 로 sample 키 추출 (batch_size={probe_batch_size}) ...")
+    probe_loader = train_ds.to_dataloader(
+        train=False, batch_size=probe_batch_size, num_workers=0
+    )
+    groups_all: list[str] = []
+    times_all: list[int] = []
+    for batch in probe_loader:
+        x, _ = batch
+        idx_df = train_ds.x_to_index(x)
+        gcol = GROUP_ID if GROUP_ID in idx_df.columns else None
+        tcol = TIME_IDX if TIME_IDX in idx_df.columns else (
+            "time" if "time" in idx_df.columns else None
+        )
+        if gcol is None or tcol is None:
+            raise RuntimeError(
+                f"x_to_index() 결과에서 group/time 컬럼 추출 실패. "
+                f"available columns={list(idx_df.columns)}"
+            )
+        groups_all.extend(idx_df[gcol].astype(str).tolist())
+        times_all.extend(idx_df[tcol].astype(int).tolist())
+
+    print(f"[sampler] {len(groups_all)} samples 키 수집 완료")
+    return (
+        np.asarray(groups_all, dtype=object),
+        np.asarray(times_all, dtype=np.int64),
     )
 
 
