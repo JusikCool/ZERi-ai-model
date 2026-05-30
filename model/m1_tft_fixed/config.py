@@ -11,7 +11,7 @@ PROJECT_ROOT = BASE_DIR.parent.parent
 
 @dataclass
 class TFTFixedConfig:
-    data_path: Path = PROJECT_ROOT / "data" / "raw" / "tft_processed_panel_v1.csv"
+    data_path: Path = PROJECT_ROOT / "data" / "raw" / "tft_processed_panel_v3.csv"
     output_dir: Path = BASE_DIR / "runs" / "tft_fixed"
     target_column: str = "Target_Return_5d"
     excluded_model_columns: List[str] = field(
@@ -63,7 +63,7 @@ class TFTFixedConfig:
     hidden_continuous_size: int = 16
     dropout: float = 0.1
     max_epochs: int = 50
-    accelerator: str = "cpu"
+    accelerator: str = "gpu"
     devices: int = 1
     gradient_clip_val: float = 0.1
     limit_train_batches: float = 1.0
