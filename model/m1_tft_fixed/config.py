@@ -54,7 +54,9 @@ class TFTFixedConfig:
     max_encoder_length: int = 60
     max_prediction_length: int = 10
     val_ratio: float = 0.2
-    quantiles: List[float] = field(default_factory=lambda: [0.10, 0.50, 0.90])
+    quantiles: List[float] = field(default_factory=lambda: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,
+        0.50,
+        0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95])
     batch_size: int = 64
     num_workers: int = 0
     learning_rate: float = 3e-4
