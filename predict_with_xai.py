@@ -1,9 +1,10 @@
 """
 학습된 TFT 체크포인트로 매일 production 추론:
   - yfinance + FRED 에서 50 종목의 최근 데이터를 직접 수집
-  - fresh data 의 last_date T 기준, 향후 10영업일(T+1 ~ T+10) 5일 누적 수익률 분위수
+  - fresh data 의 last_date T 기준, 향후 N영업일(T+1 ~ T+N) 5일 누적 수익률 분위수
     (T = today - 5 거래일. Target_Return_5d 가 valid 한 마지막 일자.
      처음 ~5일 예측은 실현 시나리오와 비교 가능, 마지막 ~5일은 진짜 미래)
+    N = config["data"]["horizon"]
   - 같은 추론 결과의 TFT XAI(변수 중요도 + attention)
   - 분위수/변수 중요도/attention 패턴을 자동으로 한국어 줄글로 해설
 
@@ -14,14 +15,16 @@
   - fetch_fresh_data(): yfinance + FRED 에서 직접 수집.
     build_dataset_50tickers.py 와 동일한 처리 (풀 history → dropna → 마지막 N 거래일 슬라이스).
     실제 추론 입력으로 사용. CSV 와 동일한 컬럼/형식.
+  - vol_group 컬럼: vol_group_map.json 으로 종목 → group 매핑 추가 (M4-Combined 필수)
 
 추론 흐름:
   1. df_train = load_data()   # 학습 CSV → train_ds (normalizer 상태)
   2. df = fetch_fresh_data()  # 신선한 입력 데이터 (today - 5 거래일까지)
-  3. df_ext = extend_with_future_rows(df, 10)  # T+1 ~ T+10 행 추가
-  4. predict_ds = TimeSeriesDataSet.from_dataset(train_ds, df_ext, predict=True)
+  3. df["vol_group"] 추가     # vol_group_map 으로 매핑
+  4. df_ext = extend_with_future_rows(df, horizon)  # T+1 ~ T+horizon 행 추가
+  5. predict_ds = TimeSeriesDataSet.from_dataset(train_ds, df_ext, predict=True)
      → train_ds 의 fitted normalizer 가 fresh data 에 적용됨
-  5. tft.predict(mode="raw") 로 분위수 + variable selection + attention 동시 추출
+  6. tft.predict(mode="raw") 로 분위수 + variable selection + attention 동시 추출
 
 Production 사용:
   매일 시장 마감 후 python predict_with_xai.py 실행.
@@ -31,11 +34,12 @@ Production 사용:
   - pip install yfinance fredapi ta
   - FRED API key 발급 (무료): https://fred.stlouisfed.org/docs/api/api_key.html
   - 본 파일 상단의 FRED_API_KEY 상수에 발급받은 key 입력
+  - data/raw/vol_group_map.json 존재 (build 스크립트에서 생성)
 
 출력:
   model/saved/
-    predict_xai_returns.csv             # 50 종목 × 10일 × 19분위수
-    predict_xai_summary_<TICKER>.png    # 종목별 통합 figure (Q0.5 + Q0.05~Q0.5 하방 밴드)
+    predict_xai_returns.csv             # 50 종목 × horizon 일 × n 분위수
+    predict_xai_summary_<TICKER>.png    # 종목별 통합 figure
     predict_xai_summary_<TICKER>.txt    # 종목별 텍스트 해설
     predict_xai_report.txt              # 50 종목 통합 보고서
     xai/
@@ -79,7 +83,11 @@ from model.m4.dataset import (
     load_data,
 )
 from model.m4.model import M4FullModel
-from validation.backtest.backtest import _build_model_kwargs
+from validation.backtest.backtest_m4 import (
+    _build_model_kwargs,
+    _load_vol_group_map,
+    GROUP_LABELS,
+)
 
 CONFIG_PATH = Path("configs/config.yaml")
 CHECKPOINT_DIR = Path("model/saved")
@@ -115,10 +123,8 @@ TICKERS_FRESH = [
     "CMCSA", "CHTR", "TMUS",
 ]
 
-# build_dataset_50tickers.py 와 동일하게 풀 history 를 fetch 한 뒤,
-# 마지막에 group 별로 N 거래일만 keep.
-# dropna 가 마지막 5일 trailing target 을 자동 제거하므로,
-# N=60 이면 사용자가 원한 "65거래일 전 ~ 5거래일 전" 범위가 됨.
+# 학습 시 window_size=60 으로 학습됐으므로 인코더 60일 유지.
+# config.yaml 의 data.window_size 와 반드시 동일해야 함.
 KEEP_LAST_N_TRADING_DAYS = 60
 
 FRED_SERIES_IDS = [
@@ -145,6 +151,7 @@ VARIABLE_LABELS = {
     "SMA_20": ("20일 이동평균", "price_tech"),
     "Returns": ("일간 수익률", "price_tech"),
     "Realized_Vol_20d": ("20일 실현 변동성", "price_tech"),
+    "GARCH_Variance": ("GARCH 추정 분산", "price_tech"),
     # 시장 리스크
     "NASDAQ_Close": ("나스닥 종가", "market_risk"),
     "VIX_Close": ("VIX (시장 공포지수)", "market_risk"),
@@ -166,6 +173,7 @@ VARIABLE_LABELS = {
     "Day_of_Week": ("요일", "calendar"),
     # 정적
     "group_id": ("종목 식별자", "static"),
+    "vol_group": ("변동성 그룹", "static"),
 }
 
 CATEGORY_LABELS = {
@@ -182,7 +190,6 @@ def _categorize(var_name: str) -> tuple[str, str]:
     """변수 이름 → (한글 라벨, 카테고리)"""
     if var_name in VARIABLE_LABELS:
         return VARIABLE_LABELS[var_name]
-    # encoder/decoder 길이 등 부가 변수
     if "encoder_length" in var_name or "decoder_length" in var_name:
         return (var_name, "other")
     if "scale" in var_name or "center" in var_name:
@@ -201,11 +208,15 @@ def generate_text_explanation(
     """
     종목별 prose 해설 생성.
     수익률 분위수 / 변수 중요도 / attention 패턴을 자연어로 설명.
+    horizon 길이에 동적으로 적응 (10일이든 30일이든 자동 표기).
     """
+    n_horizon = len(fc_g)           # 예측 시점 수 (10, 30 등)
+    weeks = max(1, round(n_horizon / 5))  # 5거래일 = 1주
+
     parts: list[str] = []
     parts.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    parts.append(f"  [{g}] 향후 10영업일 5일 누적 수익률 전망 분석")
-    parts.append(f"  (기준일 T = {last_obs_date.date()}, 예측 구간 = T+1 ~ T+10)")
+    parts.append(f"  [{g}] 향후 {n_horizon}영업일 5일 누적 수익률 전망 분석")
+    parts.append(f"  (기준일 T = {last_obs_date.date()}, 예측 구간 = T+1 ~ T+{n_horizon})")
     parts.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     # ---- 1. 수익률 전망 (Q0.05 ~ Q0.5 하방 시나리오 + 중앙) ----
@@ -216,7 +227,7 @@ def generate_text_explanation(
     median_min, median_max = float(np.min(q5)), float(np.max(q5))
     q_low_avg = float(np.mean(q_low))
     q_low_min, q_low_max = float(np.min(q_low)), float(np.max(q_low))
-    downside_band_avg = float(np.mean(q5 - q_low))  # Q0.05 → Q0.5 폭
+    downside_band_avg = float(np.mean(q5 - q_low))
 
     if median_avg > 0.005:
         direction = "상승"
@@ -225,8 +236,6 @@ def generate_text_explanation(
     else:
         direction = "횡보"
 
-    # 하방 폭이 최근 실현 변동성 대비 어느 수준인지
-    # (정규분포 가정 하 Q0.05 ≈ -1.645σ → 한쪽 꼬리 폭 ~1.645σ 가 기대치)
     hist_std = float(hist_g["Target_Return_5d"].std()) if len(hist_g) > 0 else 0.0
     band_ratio_desc = ""
     if hist_std > 0:
@@ -247,12 +256,12 @@ def generate_text_explanation(
     parts.append("")
     parts.append("◆ 수익률 전망 (중앙 시나리오 + 하방 분위수)")
     parts.append(
-        f"  Q0.5(중앙 시나리오) 10일 평균은 {median_avg*100:+.2f}% 로, "
-        f"향후 2주 동안 5일 단위 누적 수익률이 대체로 {direction} 흐름을 보일 것으로 모델이 추정합니다. "
+        f"  Q0.5(중앙 시나리오) {n_horizon}일 평균은 {median_avg*100:+.2f}% 로, "
+        f"향후 약 {weeks}주 동안 5일 단위 누적 수익률이 대체로 {direction} 흐름을 보일 것으로 모델이 추정합니다. "
         f"개별 시점별 Q0.5 는 {median_min*100:+.2f}% ~ {median_max*100:+.2f}% 범위에 위치합니다."
     )
     parts.append(
-        f"  Q0.05(하위 5% 극단 비관 시나리오) 10일 평균은 {q_low_avg*100:+.2f}%, "
+        f"  Q0.05(하위 5% 극단 비관 시나리오) {n_horizon}일 평균은 {q_low_avg*100:+.2f}%, "
         f"개별 시점 범위 {q_low_min*100:+.2f}% ~ {q_low_max*100:+.2f}% 입니다."
     )
     parts.append(
@@ -278,7 +287,6 @@ def generate_text_explanation(
             )
         parts.extend(bullet_lines)
 
-        # 카테고리 점유율
         total_imp = df_imp["importance"].sum()
         if total_imp > 0:
             cat_share = (
@@ -311,10 +319,10 @@ def generate_text_explanation(
             flat = att.mean(axis=tuple(range(att.ndim - 1)))
 
         n_enc = len(flat)
-        top_idx = np.argsort(flat)[-3:][::-1]  # 상위 3 peak
+        top_idx = np.argsort(flat)[-3:][::-1]
         peak_lines = []
         for rank, idx in enumerate(top_idx, 1):
-            rel = idx - n_enc  # 음수 (최근일=−1)
+            rel = idx - n_enc
             offset_back = abs(rel)
             try:
                 actual_date = pd.bdate_range(
@@ -329,7 +337,6 @@ def generate_text_explanation(
             )
         parts.extend(peak_lines)
 
-        # 시간대 분포
         recent = float(np.mean(flat[-10:])) if n_enc >= 10 else float(np.mean(flat))
         mid = (
             float(np.mean(flat[-30:-10]))
@@ -361,28 +368,20 @@ def generate_text_explanation(
 def fetch_fresh_data() -> pd.DataFrame:
     """
     yfinance + FRED 에서 데이터를 직접 수집해서, dataset.py 의 load_data() 와
-    동일한 컬럼 / dtype / 정렬 / time_idx 구조로 DataFrame 을 반환한다.
+    동일한 컬럼 / dtype / 정렬 / time_idx 구조로 DataFrame 을 반환.
 
-    핵심 원칙: build_dataset_50tickers.py 의 검증된 fetch 패턴을 100% 동일하게 따른다.
-      - FRED: fred.get_series(sid)         (전체 history, observation_start 미사용)
-      - yf.download: start="1980-01-01"    (전체 history)
-      - yf.Ticker.history: period="max"    (전체 history)
-    이렇게 풀 history 를 받아야 ffill/bfill 이 항상 모든 컬럼을 채워서
-    dropna 가 의도한 행만 잘라냄.
+    핵심 원칙: build_dataset_50tickers.py 의 검증된 fetch 패턴 100% 동일.
+      - FRED: fred.get_series(sid)
+      - yf.download: start="1980-01-01"
+      - yf.Ticker.history: period="max"
 
     그 다음:
       - 기술지표 (RSI/ATR/SMA, Realized_Vol_20d) 계산
       - Target_Return_5d = Close.shift(-5) / Close - 1
       - dropna(): warmup 초기 + 마지막 5일 trailing 모두 자동 제거
       - balanced panel: 가장 늦은 시작일에 맞춤
-      - **마지막에 group 별로 KEEP_LAST_N_TRADING_DAYS 만 keep**
-        → N=60 이면 "65거래일 전 ~ 5거래일 전" 범위 (window_size=60 인코더용)
+      - 마지막에 group 별로 KEEP_LAST_N_TRADING_DAYS 만 keep
       - time_idx: load_data 와 동일하게 group 별 cumcount
-
-    예측 의미:
-      T+1 = last_date + 1 거래일 (= today - 4 거래일)
-      → 처음 ~5일 예측은 실현된 5일 수익률과 비교 가능 (검증)
-      → 마지막 ~5일 예측은 진짜 미래 (forecast)
     """
     if FRED_API_KEY == "YOUR_FRED_API_KEY_HERE":
         raise ValueError(
@@ -396,13 +395,13 @@ def fetch_fresh_data() -> pd.DataFrame:
         f"(전체 history fetch → 마지막 {KEEP_LAST_N_TRADING_DAYS} 거래일만 keep)"
     )
 
-    # ---- FRED 거시지표 (전체 history) ----
+    # ---- FRED 거시지표 ----
     print("  [1/3] FRED 거시지표...")
     fred = Fred(api_key=FRED_API_KEY)
     fred_frames = []
     for sid in FRED_SERIES_IDS:
         try:
-            s = fred.get_series(sid)  # observation_start 없이 전체
+            s = fred.get_series(sid)
             if not s.empty:
                 fred_frames.append(s.to_frame(name=sid))
             else:
@@ -413,7 +412,7 @@ def fetch_fresh_data() -> pd.DataFrame:
     df_fred.index.name = "Date"
     df_fred.index = pd.to_datetime(df_fred.index)
 
-    # ---- VIX, NASDAQ (전체 history) ----
+    # ---- VIX, NASDAQ ----
     print("  [2/3] VIX / NASDAQ...")
     market_data = yf.download(
         ["^VIX", "^IXIC"],
@@ -432,7 +431,7 @@ def fetch_fresh_data() -> pd.DataFrame:
         market_close.index, utc=True
     ).tz_localize(None).normalize()
 
-    # ---- 종목별 처리 (전체 history) ----
+    # ---- 종목별 처리 ----
     print(f"  [3/3] 종목별 처리 ({len(TICKERS_FRESH)})...")
     datasets = []
     for ticker in TICKERS_FRESH:
@@ -446,7 +445,6 @@ def fetch_fresh_data() -> pd.DataFrame:
             ).tz_localize(None).normalize()
             df_stock.index.name = "Date"
 
-            # build_dataset_50tickers.py 와 동일한 파이프라인
             df = df_stock.join(market_close, how="left")
             df = df.join(df_fred, how="left")
             df.ffill(inplace=True)
@@ -488,13 +486,11 @@ def fetch_fresh_data() -> pd.DataFrame:
     if not datasets:
         raise RuntimeError("fresh fetch 실패: 종목 데이터가 하나도 없습니다.")
 
-    # ---- balanced panel: 가장 늦은 공통 시작일 ----
     final_df = pd.concat(datasets, ignore_index=True)
     min_dates = final_df.groupby("group_id")["Date"].min()
     common_start = min_dates.max()
     final_df = final_df[final_df["Date"] >= common_start].copy()
 
-    # ---- 마지막 N 거래일만 group 별로 keep ----
     final_df = final_df.sort_values(["group_id", "Date"]).reset_index(drop=True)
     final_df = (
         final_df.groupby("group_id", group_keys=False)
@@ -502,7 +498,6 @@ def fetch_fresh_data() -> pd.DataFrame:
                 .reset_index(drop=True)
     )
 
-    # ---- load_data() 와 동일한 형식으로 정렬 + dtype + time_idx ----
     final_df["group_id"] = final_df["group_id"].astype(str)
     final_df["Month"] = final_df["Month"].astype(str)
     final_df["Day_of_Week"] = final_df["Day_of_Week"].astype(str)
@@ -523,17 +518,17 @@ def fetch_fresh_data() -> pd.DataFrame:
 # ------------------------------------------------------------
 def extend_with_future_rows(df: pd.DataFrame, n_future: int = 10) -> pd.DataFrame:
     """
-    각 group_id 별로 마지막 거래일 다음 n_future 영업일 행을 추가한다.
-    NaN 이 절대 남지 않도록 다중 안전장치 적용.
+    각 group_id 별로 마지막 거래일 다음 n_future 영업일 행을 추가.
 
-      1) 미래 각 행을 dict 로 명시적으로 구성 (각 컬럼별로 값 선정)
+    NaN 이 절대 남지 않도록 다중 안전장치 적용:
+      1) 미래 각 행을 dict 로 명시적으로 구성
          - Date: 영업일 캘린더
          - Month, Day_of_Week: 날짜에서 계산
-         - Target_Return_5d: 0.0 (placeholder, 추론에 영향 없음)
+         - Target_Return_5d: 0.0 (placeholder)
+         - vol_group 등 static: last_row 값 복사
          - 그 외: last_row 값 (NaN 이면 0.0 fallback)
       2) 원본과 dtype 일치
       3) 최종 fillna(0.0) 로 모든 numeric NaN 제거
-      4) 진단 출력
     """
     pieces = []
     for g, sub in df.groupby(GROUP_ID, sort=False):
@@ -559,7 +554,7 @@ def extend_with_future_rows(df: pd.DataFrame, n_future: int = 10) -> pd.DataFram
                 elif col == TARGET:
                     rec[col] = 0.0
                 elif col == TIME_IDX:
-                    rec[col] = 0  # 뒤에서 cumcount 로 재계산
+                    rec[col] = 0
                 else:
                     val = last_row[col]
                     rec[col] = 0.0 if pd.isna(val) else val
@@ -567,7 +562,6 @@ def extend_with_future_rows(df: pd.DataFrame, n_future: int = 10) -> pd.DataFram
 
         future_df = pd.DataFrame(future_records, columns=sub.columns)
 
-        # dtype 일치
         for col in sub.columns:
             try:
                 future_df[col] = future_df[col].astype(sub[col].dtype)
@@ -579,7 +573,6 @@ def extend_with_future_rows(df: pd.DataFrame, n_future: int = 10) -> pd.DataFram
     extended = pd.concat(pieces, ignore_index=True)
     extended[TIME_IDX] = extended.groupby(GROUP_ID).cumcount()
 
-    # 최종 안전장치: 모든 numeric 컬럼의 잔여 NaN 을 0.0 으로
     numeric_cols = extended.select_dtypes(include=[np.number]).columns.tolist()
     nan_before = int(extended[numeric_cols].isna().sum().sum())
     if nan_before > 0:
@@ -588,7 +581,6 @@ def extend_with_future_rows(df: pd.DataFrame, n_future: int = 10) -> pd.DataFram
         print(per_col[per_col > 0])
         extended[numeric_cols] = extended[numeric_cols].fillna(0.0)
 
-    # 진단 (assert 로 명시적 차단)
     target_nan = int(extended[TARGET].isna().sum())
     total_nan = int(extended.isna().sum().sum())
     print(f"[CHECK] df_ext shape={extended.shape}  total_nan={total_nan}  target_nan={target_nan}")
@@ -642,7 +634,7 @@ def _save_attention_plot(attention: torch.Tensor, title: str, out_path: Path) ->
     elif arr.ndim == 2:
         im = ax.imshow(arr, aspect="auto", cmap="viridis")
         ax.set_xlabel("Encoder time step")
-        ax.set_ylabel("Decoder step (T+1 ~ T+10)")
+        ax.set_ylabel("Decoder step")
         plt.colorbar(im, ax=ax, label="Attention")
     else:
         flat = arr.mean(axis=tuple(range(arr.ndim - 1)))
@@ -664,39 +656,18 @@ def _save_raw_xai_csv(
     last_obs_date: pd.Timestamp,
     raw_dir: Path,
 ) -> None:
-    """
-    종목별 raw XAI 텐서를 정제(reduction) 없이 그대로 CSV 로 저장.
-
-    출력 파일 (raw_dir 아래):
-      - {g}_predictions.csv               # (decoder_len × n_quantiles) 분위수 예측
-      - {g}_encoder_variable_weights.csv  # (encoder_len × n_enc_vars) 시점별 변수 선택
-      - {g}_decoder_variable_weights.csv  # (decoder_len × n_dec_vars) 시점별 변수 선택
-      - {g}_static_variable_weights.csv   # (n_static_vars,) 정적 변수 선택
-
-    interpret_output 의 reduction="sum" 으로 평균 내기 전 원형 텐서.
-    이 값들의 시간축 평균이 기존 막대그래프(*_variables.png) 의 importance 값.
-    """
+    """종목별 raw XAI 텐서를 정제 전 형태로 CSV 로 저장."""
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     def _to_2d(t):
-        """(batch, ...) 텐서를 (time, n_vars) 또는 (time, n_quantiles) 형태로 환원.
-
-        주의: pytorch_forecasting TFT 의 raw output 에서
-          - encoder_variables, decoder_variables: (batch, time, 1, n_vars)
-            (variable selection 의 singleton 차원이 -2 위치에 들어있음)
-          - prediction: (batch, time, n_quantiles)  (singleton 없음)
-        따라서 np.squeeze 로 모든 size-1 차원을 먼저 제거한 뒤,
-        남은 batch 차원이 있으면 mean 으로 reduce.
-        """
         arr = t.detach().cpu().numpy()
-        arr = np.squeeze(arr)  # 모든 size-1 차원 (batch=1, VSN singleton) 제거
+        arr = np.squeeze(arr)
         if arr.ndim >= 3:
-            arr = arr.mean(axis=0)  # 남은 batch 차원이 있으면 평균
+            arr = arr.mean(axis=0)
         return arr
 
-    # 1) 예측 분위수 (decoder_len × n_quantiles)
     if "prediction" in out_g and isinstance(out_g["prediction"], torch.Tensor):
-        pred = _to_2d(out_g["prediction"])  # (decoder_len, n_quantiles)
+        pred = _to_2d(out_g["prediction"])
         if pred.ndim == 2:
             future_dates = pd.bdate_range(
                 start=last_obs_date + pd.Timedelta(days=1), periods=pred.shape[0]
@@ -708,7 +679,6 @@ def _save_raw_xai_csv(
             df_p.index.name = "Date"
             df_p.to_csv(raw_dir / f"{g}_predictions.csv")
 
-    # 2) Encoder variable selection weights (encoder_len × n_enc_vars)
     if "encoder_variables" in out_g and isinstance(
         out_g["encoder_variables"], torch.Tensor
     ):
@@ -716,12 +686,11 @@ def _save_raw_xai_csv(
         if enc.ndim == 2:
             n_time, n_var = enc.shape
             cols = encoder_vars[:n_var] if encoder_vars else [f"var_{i}" for i in range(n_var)]
-            idx = [f"T-{n_time - i}" for i in range(n_time)]  # T-60 … T-1
+            idx = [f"T-{n_time - i}" for i in range(n_time)]
             df_e = pd.DataFrame(enc, index=idx, columns=cols)
             df_e.index.name = "encoder_step"
             df_e.to_csv(raw_dir / f"{g}_encoder_variable_weights.csv")
 
-    # 3) Decoder variable selection weights (decoder_len × n_dec_vars)
     if "decoder_variables" in out_g and isinstance(
         out_g["decoder_variables"], torch.Tensor
     ):
@@ -738,7 +707,6 @@ def _save_raw_xai_csv(
             df_d.index.name = "Date"
             df_d.to_csv(raw_dir / f"{g}_decoder_variable_weights.csv")
 
-    # 4) Static variable selection weights (n_static_vars,)
     if "static_variables" in out_g and isinstance(
         out_g["static_variables"], torch.Tensor
     ):
@@ -863,7 +831,22 @@ def main() -> None:
         max_prediction_length=horizon,
     )
 
-    model_kwargs = _build_model_kwargs(model_cfg, vix_mean, vix_std)
+    # M4-Combined 모드: vol_group_map 로드 + ckpt 기반 architecture 자동 추정
+    mode = "m4_combined"
+    vol_group_map = _load_vol_group_map()
+    if vol_group_map is None:
+        raise FileNotFoundError(
+            "data/raw/vol_group_map.json 이 없습니다. "
+            "먼저 build 스크립트를 실행하여 vol_group_map.json 을 생성하세요."
+        )
+    print(f"  mode: {mode}")
+    print(f"  vol_group_map: {len(vol_group_map)} tickers")
+
+    model_kwargs = _build_model_kwargs(
+        model_cfg, vix_mean, vix_std,
+        mode=mode, df=df_train, vol_group_map=vol_group_map,
+        ckpt_path=ckpt_path,
+    )
     model = M4FullModel.from_dataset(dataset=train_ds, **model_kwargs)
     ckpt = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(ckpt["state_dict"])
@@ -873,8 +856,45 @@ def main() -> None:
     # ---- (B) yfinance + FRED 에서 신선한 데이터 수집 → 실제 추론 입력 ----
     df = fetch_fresh_data()
 
+    # vol_group 컬럼 추가 (m4_combined 학습 시 static_categorical 로 사용됨)
+    default_vol_group = GROUP_LABELS[len(GROUP_LABELS) // 2]  # mid_vol
+    df["vol_group"] = (
+        df["group_id"].map(vol_group_map).fillna(default_vol_group).astype(str)
+    )
+    vol_group_counts = df.groupby("vol_group")["group_id"].nunique().to_dict()
+    print(f"  vol_group 컬럼 추가: {vol_group_counts}")
+
+    # 학습 CSV 의 컬럼 구성과 일치시키기.
+    # fetch_fresh_data 에서 FRED API 실패 등으로 누락된 컬럼이 있을 수 있음.
+    # 학습 CSV 의 마지막값으로 보충 (FRED 거시 변수는 모든 종목 동일하므로 글로벌 마지막값으로 충분).
+    train_cols = set(df_train.columns)
+    fresh_cols = set(df.columns)
+    missing = sorted(train_cols - fresh_cols)
+    if missing:
+        print(f"  ⚠️ fresh data 에서 누락된 컬럼 {len(missing)}개 → 학습 CSV 값으로 보충")
+        df_train_sorted = df_train.sort_values("Date")
+        for col in missing:
+            try:
+                fallback = df_train_sorted[col].dropna().iloc[-1]
+            except (IndexError, KeyError):
+                fallback = 0.0
+            df[col] = fallback
+            print(f"     {col} = {fallback}")
+
+    # 반대로 fresh 에만 있고 학습엔 없는 컬럼은 제거
+    extra = sorted(fresh_cols - train_cols - {"Date"})
+    if extra:
+        print(f"  ⚠️ fresh data 에만 있는 컬럼 {len(extra)}개 제거: {extra}")
+        df = df.drop(columns=extra)
+
+    # 컬럼 순서를 학습 CSV 와 동일하게 정렬
+    common_cols = [c for c in df_train.columns if c in df.columns]
+    df = df[common_cols]
+    print(f"  컬럼 정합성 OK: fresh {len(df.columns)}개 vs 학습 {len(df_train.columns)}개")
+
+
     # ---- 미래 행 확장 → predict 데이터셋 ----
-    print("\n미래 10영업일 행 추가 중...")
+    print(f"\n미래 {horizon}영업일 행 추가 중...")
     df_ext = extend_with_future_rows(df, n_future=horizon)
 
     # train_ds 의 fitted normalizer 가 fresh data 에 적용됨
@@ -906,7 +926,7 @@ def main() -> None:
     decoder_vars = list(tft.decoder_variables)
     static_vars = list(tft.static_variables)
 
-    # ---- (1) 수익률 결과 정리: T+1 ~ T+10 ----
+    # ---- (1) 수익률 결과 정리: T+1 ~ T+horizon ----
     rows = []
     for i, g in enumerate(all_groups):
         sub = df[df[GROUP_ID] == g].sort_values("Date")
@@ -933,7 +953,7 @@ def main() -> None:
     ret_path = OUTPUT_DIR / "predict_xai_returns.csv"
     df_ret.to_csv(ret_path, index=False)
 
-    print("\n=== T+1 ~ T+10 5일 누적 수익률 분위수 예측 ===")
+    print(f"\n=== T+1 ~ T+{horizon} 5일 누적 수익률 분위수 예측 ===")
     print("(각 행: 'Date 시점에서 본 향후 5거래일 누적 수익률' 분위수)")
     print(df_ret.to_string(index=False))
     print(f"\n수익률 CSV: {ret_path}")
@@ -1032,10 +1052,8 @@ def main() -> None:
             OUTPUT_DIR / f"predict_xai_summary_{g}.png",
         )
 
-        # 텍스트 해설 생성 (종목별 .txt + 통합 보고서용)
         last_obs_date = df[df[GROUP_ID] == g]["Date"].max()
 
-        # raw XAI 텐서를 정제 전 형태로 CSV 저장
         _save_raw_xai_csv(
             g, out_g, encoder_vars, decoder_vars, static_vars,
             quantiles, last_obs_date, XAI_DIR / "raw",
@@ -1044,11 +1062,9 @@ def main() -> None:
         explanation = generate_text_explanation(
             g, fc_g, hist_g, interp_g, encoder_vars, last_obs_date
         )
-        # 종목별 개별 .txt
         txt_path = OUTPUT_DIR / f"predict_xai_summary_{g}.txt"
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(explanation)
-        # 통합 보고서에 누적
         text_explanations.append(explanation)
         print(f"\n{explanation}")
 
@@ -1067,12 +1083,12 @@ def main() -> None:
             print(f"\n[{g}]")
             print(top[["variable", "importance"]].to_string(index=False))
 
-    # 통합 보고서 (모든 종목 텍스트 해설 한 파일에)
     if text_explanations:
         report_path = OUTPUT_DIR / "predict_xai_report.txt"
         header = (
             "TFT 예측 + XAI 자동 해설 보고서\n"
             f"생성: predict_with_xai.py\n"
+            f"horizon: {horizon} 영업일\n"
             f"종목 수: {len(text_explanations)}\n"
             "=" * 60 + "\n\n"
         )
@@ -1082,7 +1098,7 @@ def main() -> None:
         print(f"\n텍스트 해설 통합 보고서: {report_path}")
 
     print(f"\n결과: {OUTPUT_DIR}")
-    print(f"  - predict_xai_returns.csv      (T+1 ~ T+10 분위수 수익률)")
+    print(f"  - predict_xai_returns.csv      (T+1 ~ T+{horizon} 분위수 수익률)")
     print(f"  - predict_xai_summary_*.png    (종목별 통합 figure)")
     print(f"  - predict_xai_summary_*.txt    (종목별 텍스트 해설)")
     print(f"  - predict_xai_report.txt       (모든 종목 통합 보고서)")
