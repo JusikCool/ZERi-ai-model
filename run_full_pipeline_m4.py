@@ -37,11 +37,14 @@ TemporalFusionTransformer.get_attention_mask = _patched_get_attention_mask
 
 from model.m4.dataset import (
     build_dataset,
+    build_dataset_sector_aware,
     build_dataloaders,
     get_vix_stats,
     load_data,
+    load_data_sector_aware,
 )
 from model.m4.model import M4FullModel
+from model.sector_models.sectors import SECTOR_IDS, SECTOR_MAP
 from validation.backtest.backtest_m4 import (
     rolling_window_backtest,
     covid_backtest,
@@ -59,6 +62,9 @@ VOL_GROUP_MAP_PATH = Path("data/raw/vol_group_map.json")
 
 # ===== M4: vol_group 라벨 (loss.py group_labels 와 일치) =====
 GROUP_LABELS = ["low_vol", "mid_vol", "high_vol"]
+
+# ===== M4-Sector: sector 라벨 (SECTOR_IDS 와 일치, 8개) =====
+SECTOR_LABELS = list(SECTOR_IDS)
 
 
 def load_config() -> dict:
@@ -119,6 +125,33 @@ def _build_ticker_to_vol_group_idx(
     return torch.tensor(vg_list, dtype=torch.long)
 
 
+def _build_ticker_to_sector_idx(panel_df, sector_labels: list):
+    """
+    Panel df 의 sorted unique ticker 순서 기준으로 sector_idx tensor 생성.
+    SECTOR_MAP 기반 (8 sectors). 매핑 없는 ticker 가 있으면 에러.
+    """
+    import torch
+
+    panel_tickers_sorted = sorted(panel_df["group_id"].unique())
+    label_to_idx = {l: i for i, l in enumerate(sector_labels)}
+
+    sec_list = []
+    unmapped = []
+    for ticker in panel_tickers_sorted:
+        sec = SECTOR_MAP.get(ticker)
+        if sec is None or sec not in label_to_idx:
+            unmapped.append(ticker)
+            continue
+        sec_list.append(label_to_idx[sec])
+
+    if unmapped:
+        raise ValueError(
+            f"m4_sector 모드: SECTOR_MAP 에 없는 ticker 가 데이터에 있음: {unmapped}. "
+            f"load_data_sector_aware(drop_unmapped=True) 를 사용하세요."
+        )
+    return torch.tensor(sec_list, dtype=torch.long)
+
+
 def _build_from_dataset_kwargs(
     params: dict,
     config: dict,
@@ -132,7 +165,9 @@ def _build_from_dataset_kwargs(
     """
     mode 에 따라 M4FullModel.from_dataset 의 인자 dict 구성.
       m4_garch    : use_garch_sigma=True + scalar α/β
-      m4_combined : use_garch_sigma=True + group 별 α/β + ticker_to_vol_group_idx
+      m4_combined : use_garch_sigma=True + vol_group 별 α/β + ticker_to_vol_group_idx
+      m4_sector   : use_garch_sigma=True + sector 별 α/β + ticker_to_sector_idx
+                    (단일 모델 + sector static categorical, 8 sectors × 4 = 32 params)
     """
     model_cfg = config["model"]
 
@@ -149,7 +184,7 @@ def _build_from_dataset_kwargs(
         vix_mean=vix_mean,
         vix_std=vix_std,
         crossing_weight=params.get("crossing_weight", 0.1),
-        use_garch_sigma=True,            # 두 모드 모두 GARCH
+        use_garch_sigma=True,
         group_labels=GROUP_LABELS,
     )
 
@@ -199,10 +234,58 @@ def _build_from_dataset_kwargs(
             beta_up_by_group=beta_up_by_group,
             ticker_to_vol_group_idx=ticker_to_vol_group_idx,
         )
+    elif mode == "m4_sector":
+        if panel_df is None:
+            raise ValueError(
+                "m4_sector 모드에 panel_df 가 필요 (ticker → sector 매핑용)."
+            )
+        alpha_down_by_group = {
+            s: params[f"alpha_down_{s}"] for s in SECTOR_LABELS
+        }
+        beta_down_by_group = {
+            s: params[f"beta_down_{s}"] for s in SECTOR_LABELS
+        }
+        alpha_up_by_group = {
+            s: params[f"alpha_up_{s}"] for s in SECTOR_LABELS
+        }
+        beta_up_by_group = {
+            s: params[f"beta_up_{s}"] for s in SECTOR_LABELS
+        }
+        ticker_to_sector_idx = _build_ticker_to_sector_idx(
+            panel_df, SECTOR_LABELS
+        )
+        common.update(
+            alpha_down_by_group=alpha_down_by_group,
+            beta_down_by_group=beta_down_by_group,
+            alpha_up_by_group=alpha_up_by_group,
+            beta_up_by_group=beta_up_by_group,
+            ticker_to_vol_group_idx=ticker_to_sector_idx,
+            group_labels=SECTOR_LABELS,
+        )
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
     return common
+
+
+def _load_data_for_mode(mode: str):
+    if mode == "m4_sector":
+        return load_data_sector_aware(drop_unmapped=True)
+    return load_data()
+
+
+def _build_dataset_for_mode(mode: str, df, max_encoder_length, max_prediction_length):
+    if mode == "m4_sector":
+        return build_dataset_sector_aware(
+            df,
+            max_encoder_length=max_encoder_length,
+            max_prediction_length=max_prediction_length,
+        )
+    return build_dataset(
+        df,
+        max_encoder_length=max_encoder_length,
+        max_prediction_length=max_prediction_length,
+    )
 
 
 def run_optuna(
@@ -212,10 +295,10 @@ def run_optuna(
     model_cfg = config["model"]
     paths = _get_paths(mode)
 
-    df = load_data()
+    df = _load_data_for_mode(mode)
     vix_mean, vix_std = get_vix_stats(df)
-    train_ds, val_ds = build_dataset(
-        df,
+    train_ds, val_ds = _build_dataset_for_mode(
+        mode, df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
@@ -259,6 +342,21 @@ def run_optuna(
                 )
                 params[f"beta_up_{g}"] = trial.suggest_float(
                     f"beta_up_{g}", 0.5, 3.0
+                )
+        elif mode == "m4_sector":
+            # sector 별 α/β (8 sectors × 4 = 32 sectoral params)
+            for s in SECTOR_LABELS:
+                params[f"alpha_down_{s}"] = trial.suggest_float(
+                    f"alpha_down_{s}", 0.5, 3.0
+                )
+                params[f"beta_down_{s}"] = trial.suggest_float(
+                    f"beta_down_{s}", 0.5, 3.0
+                )
+                params[f"alpha_up_{s}"] = trial.suggest_float(
+                    f"alpha_up_{s}", 0.5, 3.0
+                )
+                params[f"beta_up_{s}"] = trial.suggest_float(
+                    f"beta_up_{s}", 0.5, 3.0
                 )
 
         from_dataset_kwargs = _build_from_dataset_kwargs(
@@ -317,10 +415,10 @@ def train_with_params(
     model_cfg = config["model"]
     paths = _get_paths(mode)
 
-    df = load_data()
+    df = _load_data_for_mode(mode)
     vix_mean, vix_std = get_vix_stats(df)
-    train_ds, val_ds = build_dataset(
-        df,
+    train_ds, val_ds = _build_dataset_for_mode(
+        mode, df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
@@ -382,10 +480,10 @@ def _print_and_save_report(report, mode: str, title: str, csv_path: Path) -> Non
 def run_backtest(config: dict, mode: str) -> None:
     """3~6단계 백테스트 통합 실행. 모드별 CSV 파일명 분리."""
     paths = _get_paths(mode)
-    df = load_data()
+    df = _load_data_for_mode(mode)
 
     # 3단계: Rolling Window
-    report = rolling_window_backtest(df, config, n_splits=5)
+    report = rolling_window_backtest(df, config, n_splits=5, mode=mode)
     _print_and_save_report(
         report, mode,
         "Rolling Window 5-Fold Backtest (Kupiec POF + Extended CC/DQ in 콘솔)",
@@ -393,7 +491,7 @@ def run_backtest(config: dict, mode: str) -> None:
     )
 
     # 4단계: COVID
-    covid_report = covid_backtest(df, config)
+    covid_report = covid_backtest(df, config, mode=mode)
     _print_and_save_report(
         covid_report, mode,
         "COVID 구간 (2020-01-01 ~ 2021-01-01)",
@@ -401,7 +499,7 @@ def run_backtest(config: dict, mode: str) -> None:
     )
 
     # 5단계: 우크라이나 + 인플레이션
-    ukraine_report = ukraine_inflation_backtest(df, config)
+    ukraine_report = ukraine_inflation_backtest(df, config, mode=mode)
     _print_and_save_report(
         ukraine_report, mode,
         "우크라이나 전쟁 + 인플레이션 구간 (2022-02-01 ~ 2022-07-01)",
@@ -409,7 +507,7 @@ def run_backtest(config: dict, mode: str) -> None:
     )
 
     # 6단계: 트럼프 관세
-    tariff_report = trump_tariff_backtest(df, config)
+    tariff_report = trump_tariff_backtest(df, config, mode=mode)
     _print_and_save_report(
         tariff_report, mode,
         "트럼프 관세 충격 구간 (2025-04-01 ~ 2025-05-31)",
@@ -421,9 +519,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["m4_garch", "m4_combined"],
+        choices=["m4_garch", "m4_combined", "m4_sector"],
         default="m4_garch",
-        help="m4_garch: scalar α/β, m4_combined: group 별 α/β",
+        help="m4_garch: scalar α/β, m4_combined: vol_group 별 α/β, "
+             "m4_sector: 8 sector 별 α/β + sector static categorical (단일 모델 sector-aware)",
     )
     parser.add_argument("--n_trials", type=int, default=30)
     parser.add_argument("--skip_optuna", action="store_true")
@@ -434,11 +533,20 @@ def main():
     print(f"  M4 Pipeline — mode = {mode}")
     print(f"{'='*60}\n")
 
-    # m4_combined 일 때 trial 권장 사항
+    # m4_combined / m4_sector 일 때 trial 권장 사항
     if mode == "m4_combined" and args.n_trials < 50 and not args.skip_optuna:
         print(
             f"⚠️ mode=m4_combined 은 17개 hyperparameter 를 탐색합니다.\n"
             f"   현재 n_trials={args.n_trials}. 50~80 권장. 계속하려면 Enter, 중단하려면 Ctrl+C."
+        )
+        try:
+            input()
+        except KeyboardInterrupt:
+            return
+    if mode == "m4_sector" and args.n_trials < 80 and not args.skip_optuna:
+        print(
+            f"⚠️ mode=m4_sector 는 37개 hyperparameter 를 탐색합니다 (8 sector × 4 + 공통 5).\n"
+            f"   현재 n_trials={args.n_trials}. 80~120 권장. 계속하려면 Enter, 중단하려면 Ctrl+C."
         )
         try:
             input()
@@ -456,6 +564,9 @@ def main():
             )
             return
         print(f"  vol_group_map 로드: {len(vol_group_map)} tickers")
+    elif mode == "m4_sector":
+        print(f"  sector_map: SECTOR_MAP ({len(SECTOR_MAP)} tickers, {len(SECTOR_LABELS)} sectors)")
+        print(f"  sectors: {SECTOR_LABELS}")
 
     if args.skip_optuna:
         model_cfg = config["model"]
@@ -470,12 +581,18 @@ def main():
             base_params.update(
                 alpha_down=1.0, beta_down=1.0, alpha_up=1.0, beta_up=1.0,
             )
-        else:  # m4_combined
+        elif mode == "m4_combined":
             for g in GROUP_LABELS:
                 base_params[f"alpha_down_{g}"] = 1.0
                 base_params[f"beta_down_{g}"] = 1.0
                 base_params[f"alpha_up_{g}"] = 1.0
                 base_params[f"beta_up_{g}"] = 1.0
+        else:  # m4_sector
+            for s in SECTOR_LABELS:
+                base_params[f"alpha_down_{s}"] = 1.0
+                base_params[f"beta_down_{s}"] = 1.0
+                base_params[f"alpha_up_{s}"] = 1.0
+                base_params[f"beta_up_{s}"] = 1.0
         params = base_params
         print(f"[Optuna 생략] config.yaml + 기본값 (α/β=1.0) 으로 학습.")
     else:

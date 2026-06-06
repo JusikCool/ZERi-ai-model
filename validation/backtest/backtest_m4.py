@@ -9,11 +9,13 @@ from pytorch_forecasting import TimeSeriesDataSet
 
 from model.m4.dataset import (
     build_dataset,
+    build_dataset_sector_aware,
     get_vix_stats,
     GROUP_ID,
     TIME_IDX,
 )
 from model.m4.model import M4FullModel
+from model.sector_models.sectors import SECTOR_IDS, SECTOR_MAP
 from validation.kupiec.kupiec import run_validation_by_group
 from validation.kupiec.coverage_tests import (
     run_validation_by_group_extended,
@@ -30,6 +32,36 @@ TRUMP_TARIFF_END = "2025-05-31"
 
 VOL_GROUP_MAP_PATH = Path("data/raw/vol_group_map.json")
 GROUP_LABELS = ["low_vol", "mid_vol", "high_vol"]
+SECTOR_LABELS = list(SECTOR_IDS)
+
+
+def _build_dataset_for_mode(mode, df, max_encoder_length, max_prediction_length):
+    if mode == "m4_sector":
+        return build_dataset_sector_aware(
+            df,
+            max_encoder_length=max_encoder_length,
+            max_prediction_length=max_prediction_length,
+        )
+    return build_dataset(
+        df,
+        max_encoder_length=max_encoder_length,
+        max_prediction_length=max_prediction_length,
+    )
+
+
+def _build_ticker_to_sector_idx(panel_df):
+    panel_tickers_sorted = sorted(panel_df["group_id"].unique())
+    label_to_idx = {l: i for i, l in enumerate(SECTOR_LABELS)}
+    sec_list = []
+    for ticker in panel_tickers_sorted:
+        sec = SECTOR_MAP.get(ticker)
+        if sec is None or sec not in label_to_idx:
+            raise ValueError(
+                f"m4_sector 백테스트: {ticker} 가 SECTOR_MAP 에 없음. "
+                f"load_data_sector_aware(drop_unmapped=True) 로 df 를 만들어 전달하세요."
+            )
+        sec_list.append(label_to_idx[sec])
+    return torch.tensor(sec_list, dtype=torch.long)
 
 
 def _best_params_path(mode: str = None) -> Path:
@@ -208,6 +240,13 @@ def _build_model_kwargs(
         kwargs["ticker_to_vol_group_idx"] = _build_ticker_to_vol_group_idx(
             df, vol_group_map
         )
+    elif mode == "m4_sector":
+        kwargs["alpha_down_by_group"] = {s: pick(f"alpha_down_{s}", 1.0) for s in SECTOR_LABELS}
+        kwargs["beta_down_by_group"] = {s: pick(f"beta_down_{s}", 1.0) for s in SECTOR_LABELS}
+        kwargs["alpha_up_by_group"] = {s: pick(f"alpha_up_{s}", 1.0) for s in SECTOR_LABELS}
+        kwargs["beta_up_by_group"] = {s: pick(f"beta_up_{s}", 1.0) for s in SECTOR_LABELS}
+        kwargs["ticker_to_vol_group_idx"] = _build_ticker_to_sector_idx(df)
+        kwargs["group_labels"] = SECTOR_LABELS
     else:
         for k in ("alpha_down", "beta_down", "alpha_up", "beta_up"):
             v = pick(k, None)
@@ -256,8 +295,8 @@ def rolling_window_backtest(
         print(f"[backtest] vol_group_map 로드: {len(vol_group_map)} tickers")
 
     vix_mean, vix_std = get_vix_stats(df)
-    train_ds, _ = build_dataset(
-        df,
+    train_ds, _ = _build_dataset_for_mode(
+        mode, df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )
@@ -335,8 +374,8 @@ def period_backtest(
         print(f"[backtest] vol_group_map 로드: {len(vol_group_map)} tickers")
 
     vix_mean, vix_std = get_vix_stats(df)
-    train_ds, _ = build_dataset(
-        df,
+    train_ds, _ = _build_dataset_for_mode(
+        mode, df,
         max_encoder_length=data_cfg["window_size"],
         max_prediction_length=data_cfg["horizon"],
     )

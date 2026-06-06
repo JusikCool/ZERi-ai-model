@@ -10,6 +10,9 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 # ===== M4 변경: v3 panel (GARCH_Variance + vol_group 포함) =====
 DATA_PATH = Path("data/raw/tft_processed_panel_v3.csv")
 
+# ===== M4-Sector 전용: v5 panel =====
+SECTOR_DATA_PATH = Path("data/raw/tft_processed_panel_v5.csv")
+
 TARGET = "Target_Return_5d"
 TIME_IDX = "time_idx"
 GROUP_ID = "group_id"
@@ -29,6 +32,9 @@ TIME_VARYING_UNKNOWN_REALS = [
 
 # ===== M4 추가: static categorical 로 사용할 변동성 그룹 =====
 STATIC_CATEGORICALS = [GROUP_ID, "vol_group"]
+
+# ===== M4-Sector: sector 까지 포함 =====
+STATIC_CATEGORICALS_SECTOR = [GROUP_ID, "vol_group", "sector"]
 
 
 def get_vix_stats(df: pd.DataFrame) -> tuple[float, float]:
@@ -50,6 +56,45 @@ def load_data(data_path: Path = DATA_PATH) -> pd.DataFrame:
     return df
 
 
+def add_sector_column(
+    df: pd.DataFrame, drop_unmapped: bool = True
+) -> pd.DataFrame:
+    """
+    SECTOR_MAP 기반으로 sector 컬럼 추가.
+    drop_unmapped=True: mapping 없는 ticker 의 행을 제거 (default).
+                       SECTOR_MAP 에 정의된 48 종목으로 제한됨.
+    drop_unmapped=False: 매핑 없는 ticker 는 sector='other' 로 라벨.
+    """
+    from model.sector_models.sectors import SECTOR_MAP
+
+    df = df.copy()
+    df["sector"] = df[GROUP_ID].map(SECTOR_MAP)
+
+    if drop_unmapped:
+        mask = df["sector"].notna()
+        if not mask.all():
+            unmapped = sorted(df.loc[~mask, GROUP_ID].unique())
+            n_dropped = int((~mask).sum())
+            print(
+                f"[sector] SECTOR_MAP 에 없는 {len(unmapped)} 종목 → {n_dropped} 행 제거: "
+                f"{unmapped[:8]}{'...' if len(unmapped) > 8 else ''}"
+            )
+            df = df[mask].reset_index(drop=True)
+            df[TIME_IDX] = df.groupby(GROUP_ID).cumcount()
+    else:
+        df["sector"] = df["sector"].fillna("other")
+
+    df["sector"] = df["sector"].astype(str)
+    return df
+
+
+def load_data_sector_aware(
+    data_path: Path = SECTOR_DATA_PATH, drop_unmapped: bool = True
+) -> pd.DataFrame:
+    df = load_data(data_path)
+    return add_sector_column(df, drop_unmapped=drop_unmapped)
+
+
 def build_dataset(
     df: pd.DataFrame,
     max_encoder_length: int = 60,
@@ -66,6 +111,53 @@ def build_dataset(
         max_encoder_length=max_encoder_length,
         max_prediction_length=max_prediction_length,
         static_categoricals=STATIC_CATEGORICALS,   # ===== M4: vol_group 추가 =====
+        time_varying_known_categoricals=TIME_VARYING_KNOWN_CATEGORICALS,
+        time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS,
+        target_normalizer=GroupNormalizer(
+            groups=[GROUP_ID], transformation=None
+        ),
+        add_relative_time_idx=False,
+        add_target_scales=True,
+        add_encoder_length=True,
+        allow_missing_timesteps=True,
+    )
+
+    val_dataset = TimeSeriesDataSet.from_dataset(
+        train_dataset,
+        df[df[TIME_IDX] > cutoff - max_encoder_length],
+        predict=True,
+        stop_randomization=True,
+    )
+
+    return train_dataset, val_dataset
+
+
+def build_dataset_sector_aware(
+    df: pd.DataFrame,
+    max_encoder_length: int = 60,
+    max_prediction_length: int = 10,
+    val_ratio: float = 0.2,
+) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
+    """
+    sector 를 static categorical 로 포함하는 dataset 빌더.
+    df 는 반드시 'sector' 컬럼을 가지고 있어야 함 (load_data_sector_aware 결과).
+    TFT 가 sector 임베딩을 자동 학습 → 단일 모델로 섹터별 패턴 분화.
+    """
+    if "sector" not in df.columns:
+        raise ValueError(
+            "df 에 'sector' 컬럼이 없습니다. load_data_sector_aware() 를 사용하세요."
+        )
+
+    cutoff = int(df[TIME_IDX].max() * (1 - val_ratio))
+
+    train_dataset = TimeSeriesDataSet(
+        df[df[TIME_IDX] <= cutoff],
+        time_idx=TIME_IDX,
+        target=TARGET,
+        group_ids=[GROUP_ID],
+        max_encoder_length=max_encoder_length,
+        max_prediction_length=max_prediction_length,
+        static_categoricals=STATIC_CATEGORICALS_SECTOR,
         time_varying_known_categoricals=TIME_VARYING_KNOWN_CATEGORICALS,
         time_varying_unknown_reals=TIME_VARYING_UNKNOWN_REALS,
         target_normalizer=GroupNormalizer(
